@@ -9,6 +9,7 @@ interface SignalData {
   id: string;
   pair: string;
   pattern: string;
+  timeframe: number;
   rawHistory: number[];
   updatedAt: any;
 }
@@ -21,6 +22,7 @@ function App() {
   // Filtros
   const [galeLimit, setGaleLimit] = useState<number>(2); // Padrão: Gale 2
   const [selectedPair, setSelectedPair] = useState<string>('ALL');
+  const [selectedTimeframe, setSelectedTimeframe] = useState<number>(5); // Padrão: M5
 
   useEffect(() => {
     const q = query(collection(db, "signals"));
@@ -49,6 +51,9 @@ function App() {
     if (selectedPair !== 'ALL') {
       filtered = filtered.filter(s => s.pair === selectedPair);
     }
+
+    // Filtra por Timeframe
+    filtered = filtered.filter(s => s.timeframe === selectedTimeframe);
 
     const getScoreForSorting = (rawHistory: number[]) => {
       if (!rawHistory) return { rate: 0, trendScore: -999 };
@@ -79,7 +84,7 @@ function App() {
       // Ordenação Secundária: Assertividade Global
       return scoreB.rate - scoreA.rate; 
     });
-  }, [signals, galeLimit, selectedPair]);
+  }, [signals, galeLimit, selectedPair, selectedTimeframe]);
 
   const uniquePairs = useMemo(() => {
     const pairs = new Set(signals.map(s => s.pair));
@@ -156,6 +161,20 @@ function App() {
             {uniquePairs.map(pair => (
               <option key={pair} value={pair}>{pair}</option>
             ))}
+          </select>
+        </div>
+        
+        <div className="flex-1 min-w-[200px]">
+          <label className="flex items-center gap-2 text-sm font-semibold text-slate-400 mb-2">
+            <Clock size={16} /> Timeframe
+          </label>
+          <select 
+            className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none focus:border-blue-500 transition-colors"
+            value={selectedTimeframe}
+            onChange={(e) => setSelectedTimeframe(Number(e.target.value))}
+          >
+            <option value={1}>1 Minuto (M1)</option>
+            <option value={5}>5 Minutos (M5)</option>
           </select>
         </div>
 
