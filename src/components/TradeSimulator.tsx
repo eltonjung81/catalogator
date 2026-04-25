@@ -135,8 +135,17 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
   const secondsToNext = getSecondsToNextCycle();
   const activeBet = getActiveBet(phase);
 
-  // Saldo "ao vivo" — desconta a aposta ativa para simular deducted em aberto
-  const displayedBankroll = simData.bankroll - activeBet;
+  // Detecta se a última operação já fechou neste ciclo de 5 min
+  const nowMsGlobal = Date.now();
+  const cycleStartMsGlobal = Math.floor(nowMsGlobal / (5 * 60 * 1000)) * (5 * 60 * 1000);
+  const lastTradeGlobal = simData.trades.length > 0 ? simData.trades[simData.trades.length - 1] : null;
+  // result >= 0 = WIN em algum nível (0=direto, 1=G1, 2=G2); -1 = LOSS total
+  const cycleOpClosed = lastTradeGlobal !== null
+    && lastTradeGlobal.time >= cycleStartMsGlobal - 60_000
+    && lastTradeGlobal.result >= 0;
+
+  // Se operação já fechou com WIN, não deduz aposta (ela foi devolvida + lucro)
+  const displayedBankroll = cycleOpClosed ? simData.bankroll : simData.bankroll - activeBet;
   const profit = simData.bankroll - 5000;
 
   // Trades para exibição (mais recentes primeiro, últimos 20)
@@ -169,17 +178,76 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
         icon: <TrendingUp size={32} className="text-amber-400/50" />
       };
     }
-    if (phase === 'M_FIXA' || phase === 'GALE1' || phase === 'GALE2') {
-      const stage = phase === 'M_FIXA' ? 'Mão Fixa' : phase === 'GALE1' ? 'Gale 1' : 'Gale 2';
+    // ── Fase de Mão Fixa ─────────────────────────────────────────────────────
+    if (phase === 'M_FIXA') {
       return {
-        msg: `Operação em Andamento (${stage}): ${pair} → ${direction}`,
-        subMsg: `${pattern} | Aguardando resultado da vela...`,
+        msg: `Operação em Andamento (Mão Fixa): ${pair} → ${direction}`,
+        subMsg: `${pattern} | Aguardando resultado da primeira vela...`,
         bgClass: 'bg-blue-500/10 border-blue-500/30',
-        dotClass: 'bg-blue-500',
+        dotClass: 'bg-blue-500 animate-pulse',
         textClass: 'text-blue-300 font-semibold',
-        icon: <TrendingUp size={32} className="text-blue-400/30" />
+        icon: <TrendingUp size={32} className="text-blue-400/50" />
       };
     }
+
+    // ── Fase de Gale 1 ───────────────────────────────────────────────────────
+    if (phase === 'GALE1') {
+      // Verifica se a mão fixa deste ciclo já ganhou (result === 0)
+      const nowMs = Date.now();
+      const cycleStartMs = Math.floor(nowMs / (5 * 60 * 1000)) * (5 * 60 * 1000);
+      const lastTrade = simData.trades.length > 0 ? simData.trades[simData.trades.length - 1] : null;
+      const inCycle = lastTrade !== null && lastTrade.time >= cycleStartMs - 60_000;
+
+      if (inCycle && lastTrade!.result === 0) {
+        // Mão Fixa ganhou → operação encerrada, NÃO entra em Gale 1
+        return {
+          msg: `✅ WIN DIRETO! ${pair} — Operação Encerrada`,
+          subMsg: 'Mão Fixa venceu. Nenhum Gale necessário.',
+          bgClass: 'bg-emerald-500/10 border-emerald-500/30',
+          dotClass: 'bg-emerald-500',
+          textClass: 'text-emerald-400 font-bold',
+          icon: <TrendingUp size={32} className="text-emerald-400/60" />
+        };
+      }
+      return {
+        msg: `Operação em Andamento (Gale 1): ${pair} → ${direction}`,
+        subMsg: `${pattern} | Mão Fixa perdeu — aguardando resultado do Gale 1...`,
+        bgClass: 'bg-orange-500/10 border-orange-500/30',
+        dotClass: 'bg-orange-500 animate-pulse',
+        textClass: 'text-orange-300 font-semibold',
+        icon: <TrendingUp size={32} className="text-orange-400/50" />
+      };
+    }
+
+    // ── Fase de Gale 2 ───────────────────────────────────────────────────────
+    if (phase === 'GALE2') {
+      const nowMs = Date.now();
+      const cycleStartMs = Math.floor(nowMs / (5 * 60 * 1000)) * (5 * 60 * 1000);
+      const lastTrade = simData.trades.length > 0 ? simData.trades[simData.trades.length - 1] : null;
+      const inCycle = lastTrade !== null && lastTrade.time >= cycleStartMs - 60_000;
+
+      if (inCycle && lastTrade!.result >= 0 && lastTrade!.result <= 1) {
+        // Ganhou na mão fixa (0) ou no Gale 1 (1) → operação encerrada, NÃO entra em Gale 2
+        const winLabel = lastTrade!.result === 0 ? 'WIN DIRETO' : 'WIN GALE 1';
+        return {
+          msg: `✅ ${winLabel}! ${pair} — Operação Encerrada`,
+          subMsg: 'Operação venceu antes de chegar ao Gale 2.',
+          bgClass: 'bg-emerald-500/10 border-emerald-500/30',
+          dotClass: 'bg-emerald-500',
+          textClass: 'text-emerald-400 font-bold',
+          icon: <TrendingUp size={32} className="text-emerald-400/60" />
+        };
+      }
+      return {
+        msg: `Operação em Andamento (Gale 2): ${pair} → ${direction}`,
+        subMsg: `${pattern} | Gale 1 perdeu — aguardando resultado do Gale 2...`,
+        bgClass: 'bg-red-500/10 border-red-500/30',
+        dotClass: 'bg-red-500 animate-pulse',
+        textClass: 'text-red-300 font-semibold',
+        icon: <TrendingDown size={32} className="text-red-400/50" />
+      };
+    }
+
     return {
       msg: `Monitorando ${pair} (${pattern})`,
       subMsg: `Próxima entrada em ${Math.floor(secondsToNext / 60)}:${String(secondsToNext % 60).padStart(2, '0')}`,
