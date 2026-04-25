@@ -4,12 +4,13 @@ exports.mercadopagoWebhook = exports.createPreference = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const mercadopago_1 = require("mercadopago");
-const client = new mercadopago_1.MercadoPagoConfig({
+const getDb = () => admin.firestore();
+const getMPClient = () => new mercadopago_1.MercadoPagoConfig({
     accessToken: process.env.MP_ACCESS_TOKEN || ''
 });
-const getDb = () => admin.firestore();
-exports.createPreference = (0, https_1.onRequest)({ cors: true, region: 'southamerica-east1', secrets: ["MP_ACCESS_TOKEN"] }, async (req, res) => {
+exports.createPreference = (0, https_1.onRequest)({ cors: true, region: 'southamerica-east1' }, async (req, res) => {
     try {
+        const client = getMPClient();
         const { uid } = req.body;
         if (!uid) {
             res.status(400).send({ error: "UID is required" });
@@ -46,9 +47,10 @@ exports.createPreference = (0, https_1.onRequest)({ cors: true, region: 'southam
         res.status(500).send(error);
     }
 });
-exports.mercadopagoWebhook = (0, https_1.onRequest)({ cors: true, region: 'southamerica-east1', secrets: ["MP_ACCESS_TOKEN"] }, async (req, res) => {
+exports.mercadopagoWebhook = (0, https_1.onRequest)({ cors: true, region: 'southamerica-east1' }, async (req, res) => {
     var _a, _b;
     try {
+        const client = getMPClient();
         const { action, data } = req.body;
         const type = req.body.type || req.query.type;
         if (action === "payment.created" || type === "payment") {

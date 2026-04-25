@@ -2,14 +2,15 @@ import { onRequest } from "firebase-functions/v2/https";
 import * as admin from 'firebase-admin';
 import { MercadoPagoConfig, Preference, Payment } from 'mercadopago';
 
-const client = new MercadoPagoConfig({ 
+const getDb = () => admin.firestore();
+
+const getMPClient = () => new MercadoPagoConfig({ 
     accessToken: process.env.MP_ACCESS_TOKEN || '' 
 });
 
-const getDb = () => admin.firestore();
-
-export const createPreference = onRequest({ cors: true, region: 'southamerica-east1', secrets: ["MP_ACCESS_TOKEN"] }, async (req, res) => {
+export const createPreference = onRequest({ cors: true, region: 'southamerica-east1' }, async (req, res) => {
     try {
+        const client = getMPClient();
         const { uid } = req.body;
         if (!uid) {
             res.status(400).send({ error: "UID is required" });
@@ -48,8 +49,9 @@ export const createPreference = onRequest({ cors: true, region: 'southamerica-ea
     }
 });
 
-export const mercadopagoWebhook = onRequest({ cors: true, region: 'southamerica-east1', secrets: ["MP_ACCESS_TOKEN"] }, async (req, res) => {
+export const mercadopagoWebhook = onRequest({ cors: true, region: 'southamerica-east1' }, async (req, res) => {
     try {
+        const client = getMPClient();
         const { action, data } = req.body;
         const type = req.body.type || req.query.type;
 
