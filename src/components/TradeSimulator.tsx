@@ -53,10 +53,10 @@ const getCyclePhase = (): { phase: 'ENTRY' | 'M_FIXA' | 'GALE1' | 'GALE2' | 'IDL
 };
 
 // Calcula o valor total investido até o momento (deducted do saldo)
-const getActiveBet = (phase: string): number => {
+const getActiveBet = (phase: 'ENTRY' | 'M_FIXA' | 'GALE1' | 'GALE2' | 'IDLE', secondsToNext: number): number => {
   if (phase === 'M_FIXA') return 1;
-  if (phase === 'GALE1') return 3;  // 1 + 2
-  if (phase === 'GALE2') return 7;  // 1 + 2 + 4
+  if (phase === 'GALE1') return secondsToNext >= 225 ? 1 : 3; // Nos primeiros 15s, aguarda resultado da Mão Fixa
+  if (phase === 'GALE2') return secondsToNext >= 165 ? 3 : 7; // Nos primeiros 15s, aguarda resultado do Gale 1
   return 0;
 };
 
@@ -133,7 +133,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
   // ─── Valores calculados a partir do relógio interno ─────────────────────
   const { phase } = getCyclePhase();
   const secondsToNext = getSecondsToNextCycle();
-  const activeBet = getActiveBet(phase);
+  const activeBet = getActiveBet(phase, secondsToNext);
 
   // Detecta se a última operação já fechou neste ciclo de 5 min
   const nowMsGlobal = Date.now();
@@ -209,6 +209,19 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
           icon: <TrendingUp size={32} className="text-emerald-400/60" />
         };
       }
+
+      // Nos primeiros 15s do Gale 1 (secondsToNext entre 240 e 225), aguarda o backend reportar
+      if (secondsToNext >= 225) {
+        return {
+          msg: `Analisando Resultado... ${pair}`,
+          subMsg: `Aguardando confirmação da Mão Fixa pela corretora...`,
+          bgClass: 'bg-slate-600/20 border-slate-500/30',
+          dotClass: 'bg-slate-400 animate-ping',
+          textClass: 'text-slate-300 font-semibold',
+          icon: <Clock size={32} className="text-slate-500" />
+        };
+      }
+
       return {
         msg: `Operação em Andamento (Gale 1): ${pair} → ${direction}`,
         subMsg: `${pattern} | Mão Fixa perdeu — aguardando resultado do Gale 1...`,
@@ -238,6 +251,19 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
           icon: <TrendingUp size={32} className="text-emerald-400/60" />
         };
       }
+
+      // Nos primeiros 15s do Gale 2 (secondsToNext entre 180 e 165), aguarda o backend reportar
+      if (secondsToNext >= 165) {
+        return {
+          msg: `Analisando Resultado... ${pair}`,
+          subMsg: `Aguardando confirmação do Gale 1 pela corretora...`,
+          bgClass: 'bg-slate-600/20 border-slate-500/30',
+          dotClass: 'bg-slate-400 animate-ping',
+          textClass: 'text-slate-300 font-semibold',
+          icon: <Clock size={32} className="text-slate-500" />
+        };
+      }
+
       return {
         msg: `Operação em Andamento (Gale 2): ${pair} → ${direction}`,
         subMsg: `${pattern} | Gale 1 perdeu — aguardando resultado do Gale 2...`,
