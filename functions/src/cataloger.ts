@@ -152,20 +152,25 @@ export const runCataloger = (
       continue;
     }
 
-    let result: number | null = -1; // Assume HIT até provar o contrário
+    let result: number | null = -1;
 
-    // Tenta até o Gale 3 (são até 4 tentativas no total)
     for (let attempt = 0; attempt <= 3; attempt++) {
-      const targetIndex = entryCandleIndex + attempt;
+      let tradeCandle: Candle | undefined;
+
+      // No M5 (bloco > 1), a tentativa pode estar dentro do bloco
+      if (entryCandleIndex + attempt < currentBlock.length) {
+        tradeCandle = currentBlock[entryCandleIndex + attempt];
+      } else {
+        // No M1 (bloco = 1), as tentativas (Gales) estão nos blocos seguintes
+        const nextBlockIdx = i + (attempt - (currentBlock.length - 1 - entryCandleIndex));
+        if (nextBlockIdx < blocks.length) {
+          tradeCandle = blocks[nextBlockIdx][0];
+        }
+      }
       
-      // Ajuste dinâmico para o tamanho do bloco atual
-      if (targetIndex >= currentBlock.length) break; 
-      
-      const tradeCandle = currentBlock[targetIndex];
-      
-      if (tradeCandle.color === prediction) {
-        result = attempt; // Salvamos em qual tentativa deu Win (0=Win, 1=G1, 2=G2, 3=G3)
-        break; // Para o laço de tentativas pois já ganhou
+      if (tradeCandle && tradeCandle.color === prediction) {
+        result = attempt;
+        break;
       }
     }
 
