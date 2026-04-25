@@ -1,11 +1,14 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.analyzeMarketAndSave = void 0;
+exports.analyzeMarketAndSave = exports.mercadopagoWebhook = exports.createPreference = void 0;
 // Robot Version 3.0 - Full Logic Overhaul
 const admin = require("firebase-admin");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
-const cataloger_1 = require("./cataloger");
 admin.initializeApp();
+var payments_1 = require("./payments");
+Object.defineProperty(exports, "createPreference", { enumerable: true, get: function () { return payments_1.createPreference; } });
+Object.defineProperty(exports, "mercadopagoWebhook", { enumerable: true, get: function () { return payments_1.mercadopagoWebhook; } });
+const cataloger_1 = require("./cataloger");
 const db = admin.firestore();
 const PAIRS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'DOTUSDT'];
 const M5_STRATEGIES = [
