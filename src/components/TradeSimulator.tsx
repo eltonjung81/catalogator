@@ -12,7 +12,6 @@ interface TradeSimulatorProps {
 }
 
 export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => {
-  const [currentStep, setCurrentStep] = useState(0);
   const [simData, setSimData] = useState<{bankroll: number, trades: any[]}>({ bankroll: 5000, trades: [] });
   
   useEffect(() => {
@@ -39,7 +38,6 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
     const updateStatus = () => {
       const now = new Date();
       const min = now.getMinutes();
-      const sec = now.getSeconds();
       const cycleMin = min % 5;
 
       if (cycleMin === 4) {
