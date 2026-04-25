@@ -7,7 +7,7 @@ import { TradeSimulator } from './components/TradeSimulator';
 import { PayPalPayment } from './components/PayPalPayment';
 import { MercadoPagoPayment } from './components/MercadoPagoPayment';
 import { useAuth } from './contexts/AuthContext';
-import { Filter, Clock, Activity, Search, Globe, Info, LogIn } from 'lucide-react';
+import { Filter, Clock, Activity, Search, Info, LogIn } from 'lucide-react';
 
 const translations = {
   pt: {
