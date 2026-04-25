@@ -85,11 +85,10 @@ export const analyzeMarketAndSave = onSchedule({
       const currentTradeId = `${top1.id}_${top1.rawHistory.length}`;
       if (simData?.lastTradeId !== currentTradeId) {
         let profit = 0;
-        let status = '';
-        if (lastResult === 0) { profit = 0.89; status = 'WIN DIRETO'; }
-        else if (lastResult === 1) { profit = 0.78; status = 'WIN GALE 1'; }
-        else if (lastResult === 2) { profit = 0.56; status = 'WIN GALE 2'; }
-        else if (lastResult === -1 || lastResult > 2) { profit = -7; status = 'LOSS (HIT)'; }
+        if (lastResult === 0) { profit = 0.89; }
+        else if (lastResult === 1) { profit = 0.78; }
+        else if (lastResult === 2) { profit = 0.56; }
+        else if (lastResult === -1 || lastResult > 2) { profit = -7; }
 
         if (lastResult !== null) {
           const newBankroll = (simData?.bankroll || 5000) + profit;

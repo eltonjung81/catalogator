@@ -75,39 +75,37 @@ exports.analyzeMarketAndSave = (0, scheduler_1.onSchedule)({
             const currentTradeId = `${top1.id}_${top1.rawHistory.length}`;
             if ((simData === null || simData === void 0 ? void 0 : simData.lastTradeId) !== currentTradeId) {
                 let profit = 0;
-                let status = '';
                 if (lastResult === 0) {
                     profit = 0.89;
-                    status = 'WIN DIRETO';
                 }
                 else if (lastResult === 1) {
                     profit = 0.78;
-                    status = 'WIN GALE 1';
                 }
                 else if (lastResult === 2) {
                     profit = 0.56;
-                    status = 'WIN GALE 2';
                 }
                 else if (lastResult === -1 || lastResult > 2) {
                     profit = -7;
-                    status = 'LOSS (HIT)';
                 }
                 if (lastResult !== null) {
                     const newBankroll = ((simData === null || simData === void 0 ? void 0 : simData.bankroll) || 5000) + profit;
+                    const currentTrades = (simData === null || simData === void 0 ? void 0 : simData.trades) || [];
                     const newTrade = {
                         pair: top1.pair,
                         profit,
-                        status,
+                        status: lastResult >= 0 && lastResult <= 2 ? 'GAIN' : 'HIT',
                         time: new Date().toISOString(),
                         id: currentTradeId
                     };
+                    // Mantém apenas os últimos 49 para adicionar o novo e totalizar 50
+                    const updatedTrades = [...currentTrades.slice(-49), newTrade];
                     await simRef.set({
                         bankroll: newBankroll,
                         lastTradeId: currentTradeId,
                         currentPair: top1.pair,
                         currentPattern: top1.pattern,
                         currentDirection: Math.random() > 0.5 ? 'COMPRADO' : 'VENDIDO',
-                        trades: admin.firestore.FieldValue.arrayUnion(newTrade),
+                        trades: updatedTrades,
                         updatedAt: admin.firestore.FieldValue.serverTimestamp()
                     }, { merge: true });
                 }
