@@ -16,8 +16,12 @@ export const fetchCandles = async (symbol: string, interval: string = '1m', limi
     const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
     const response = await axios.get(url);
     
+    const now = Date.now();
     // O retorno da Binance é um array de arrays
-    return response.data.map((data: any[]) => {
+    // Filtramos data[6] (close time) para ignorar a vela atual que ainda está oscilando (aberta)
+    return response.data
+      .filter((data: any[]) => now > data[6])
+      .map((data: any[]) => {
       const open = parseFloat(data[1]);
       const close = parseFloat(data[4]);
       let color: 'GREEN' | 'RED' | 'DOJI' = 'DOJI';
