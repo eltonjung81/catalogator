@@ -63,6 +63,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let remaining = 0;
 
     try {
+      // 1. Verificação de Admin (Acesso Vitalício)
+      if (currentUser.email === 'eltonjung81@gmail.com') {
+        setTimeRemaining(999999999); // Acesso eterno
+        return;
+      }
+
       if (currentUser.isAnonymous) {
         // Lógica para modo Anônimo (2 minutos) com trava de IP
         const ipEligible = await checkIpEligibility(currentUser.uid);
