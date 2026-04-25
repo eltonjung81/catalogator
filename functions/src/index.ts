@@ -44,18 +44,79 @@ export const analyzeMarketAndSave = functions.scheduler.onSchedule({
           const docId = `${pair}_${strategy.name.replace(/\s+/g, '')}_M${tf}`;
           
           await db.collection("signals").doc(docId).set({
-            pair: pair,
+            id: docId,
+            pair,
             pattern: strategy.name,
-            timeframe: tf, // Salva se é 1 ou 5
+            timeframe: tf,
             rawHistory: filteredHistory,
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
           });
         }
       } catch (error) {
-        console.error(`Erro ao processar ${pair} em M${tf}:`, error);
+        console.error(`Erro ao processar ${pair} M${tf}:`, error);
       }
     }
   }
 
+  // Lógica do Simulador Global Persistente (Apenas para M5 Top 1)
+  try {
+    const allM5Signals = await db.collection("signals")
+      .where("timeframe", "==", 5)
+      .get();
+    
+    const signalsData = allM5Signals.docs.map(doc => doc.data());
+    
+    // Mesma lógica de ordenação do frontend
+    const sorted = signalsData.sort((a, b) => {
+      const getScore = (h: number[]) => {
+        const rec = h.slice(-100);
+        const wins = rec.filter(r => r >= 0 && r <= 2).length;
+        const trend = h.slice(-10).reduce((acc, curr) => acc + (curr >= 0 ? 1 : -2), 0);
+        return wins + (trend * 10); // Prioriza tendência
+      };
+      return getScore(b.rawHistory) - getScore(a.rawHistory);
+    });
+
+    const top1 = sorted[0];
+    if (top1 && top1.rawHistory && top1.rawHistory.length > 0) {
+      const lastResult = top1.rawHistory[top1.rawHistory.length - 1];
+      const simRef = db.collection("stats").doc("global_simulator");
+      const simSnap = await simRef.get();
+      const simData = simSnap.exists ? simSnap.data() : { bankroll: 5000, lastTradeId: '' };
+
+      // Se for um novo resultado para esse par
+      const currentTradeId = `${top1.id}_${top1.rawHistory.length}`;
+      if (simData?.lastTradeId !== currentTradeId) {
+        let profit = 0;
+        let status = '';
+        if (lastResult === 0) { profit = 0.89; status = 'WIN DIRETO'; }
+        else if (lastResult === 1) { profit = 0.78; status = 'WIN GALE 1'; }
+        else if (lastResult === 2) { profit = 0.56; status = 'WIN GALE 2'; }
+        else if (lastResult === -1 || lastResult > 2) { profit = -7; status = 'LOSS (HIT)'; }
+
+        if (lastResult !== null) {
+          const newBankroll = (simData?.bankroll || 5000) + profit;
+          const newTrade = {
+            pair: top1.pair,
+            profit,
+            status,
+            time: new Date().toISOString(),
+            id: currentTradeId
+          };
+
+          await simRef.set({
+            bankroll: newBankroll,
+            lastTradeId: currentTradeId,
+            trades: admin.firestore.FieldValue.arrayUnion(newTrade),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Erro no Simulador Global:", error);
+  }
+
   console.log("Catalogação finalizada.");
+  return null;
 });

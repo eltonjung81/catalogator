@@ -1,5 +1,7 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Wallet, TrendingUp, Zap, ArrowUpCircle, ArrowDownCircle } from 'lucide-react';
+import { db } from '../lib/firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
 
 interface TradeSimulatorProps {
   topSignal: {
@@ -11,49 +13,22 @@ interface TradeSimulatorProps {
 
 export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => {
   const [currentStep, setCurrentStep] = useState(0);
+  const [simData, setSimData] = useState<{bankroll: number, trades: any[]}>({ bankroll: 5000, trades: [] });
   
-  const simulation = useMemo(() => {
-    if (!topSignal || !topSignal.rawHistory) return { bankroll: 5000, profit: 0, trades: [] };
-
-    let bankroll = 5000;
-    const history = topSignal.rawHistory.slice(-20); // Simula as últimas 20 entradas
-    const results = [];
-
-    for (const res of history) {
-      let tradeProfit = 0;
-      let status = '';
-
-      if (res === 0) {
-        tradeProfit = 0.89; // Win Direto ($1 * 89%)
-        status = 'WIN DIRETO';
-      } else if (res === 1) {
-        tradeProfit = (2 * 0.89) - 1; // Win G1
-        status = 'WIN GALE 1';
-      } else if (res === 2) {
-        tradeProfit = (4 * 0.89) - 1 - 2; // Win G2
-        status = 'WIN GALE 2';
-      } else if (res === -1 || res > 2) {
-        tradeProfit = -7; // Hit (1+2+4)
-        status = 'LOSS (HIT)';
-      }
-
-      if (res !== null) {
-        bankroll += tradeProfit;
-        results.push({
-          pair: topSignal.pair,
-          profit: tradeProfit,
-          status,
-          time: new Date().toLocaleTimeString()
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, "stats", "global_simulator"), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setSimData({
+          bankroll: data.bankroll || 5000,
+          trades: (data.trades || []).slice(-20).reverse()
         });
       }
-    }
+    });
+    return () => unsub();
+  }, []);
 
-    return { 
-      bankroll, 
-      profit: bankroll - 5000, 
-      trades: results.reverse() 
-    };
-  }, [topSignal]);
+  const profit = simData.bankroll - 5000;
 
   // Efeito visual de "Analisando..."
   useEffect(() => {
@@ -85,12 +60,12 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-700">
               <p className="text-slate-500 text-xs mb-1">Banca Atual (Demo)</p>
-              <p className="text-2xl font-bold text-white">$ {simulation.bankroll.toFixed(2)}</p>
+              <p className="text-2xl font-bold text-white">$ {simData.bankroll.toFixed(2)}</p>
             </div>
             <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-700">
               <p className="text-slate-500 text-xs mb-1">Lucro Acumulado</p>
-              <p className={`text-2xl font-bold ${simulation.profit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                {simulation.profit >= 0 ? '+' : ''}$ {simulation.profit.toFixed(2)}
+              <p className={`text-2xl font-bold ${profit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {profit >= 0 ? '+' : ''}$ {profit.toFixed(2)}
               </p>
             </div>
           </div>
@@ -121,7 +96,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
             <h3 className="font-semibold text-xs uppercase">Últimas Operações do Robô</h3>
           </div>
           <div className="space-y-2 max-h-[160px] overflow-y-auto pr-2 custom-scrollbar">
-            {simulation.trades.map((trade, i) => (
+            {simData.trades.map((trade, i) => (
               <div key={i} className="flex items-center justify-between bg-slate-900/50 p-2 rounded-lg border border-slate-800 text-[11px]">
                 <div className="flex items-center gap-2">
                   {trade.profit > 0 ? (
