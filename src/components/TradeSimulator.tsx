@@ -40,10 +40,13 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
       const min = now.getMinutes();
       const cycleMin = min % 5;
 
+      // Gera uma semente estável para o bloco de 5 minutos atual
+      const blockTimestamp = Math.floor(now.getTime() / (5 * 60 * 1000));
+      // Usa o par e o bloco para decidir a direção (fixo por 5 min)
+      const directionSeed = (blockTimestamp + (topSignal?.pair.length || 0)) % 2;
+      const direction = directionSeed === 0 ? 'COMPRADO' : 'VENDIDO';
+
       if (cycleMin === 4) {
-        // Padrão Formando (Último minuto do bloco)
-        // Lógica simples para simular direção baseada no par (paridade do timestamp)
-        const direction = now.getTime() % 2 === 0 ? 'COMPRADO' : 'VENDIDO'; 
         setLiveStatus({
           msg: `Padrão Detectado! Entrando ${direction} em ${topSignal?.pair} (${topSignal?.pattern}) na próxima vela...`,
           color: 'text-amber-400 animate-pulse',
@@ -51,7 +54,6 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
         });
       } else if (cycleMin === 0 || cycleMin === 1 || cycleMin === 2) {
         const stage = cycleMin === 0 ? 'Mão Fixa' : `Gale ${cycleMin}`;
-        const direction = now.getTime() % 2 === 0 ? 'COMPRADO' : 'VENDIDO';
         setLiveStatus({
           msg: `Operação em Andamento (${stage}): ${topSignal?.pair} - ${topSignal?.pattern} (${direction})`,
           color: 'text-emerald-400',
