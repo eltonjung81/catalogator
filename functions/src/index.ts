@@ -1,3 +1,4 @@
+// Robot Version 2.0 - Stable Leader Logic
 import * as admin from 'firebase-admin';
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { fetchCandles, groupInBlocks, runCataloger, analyzeMHI1, analyzeMHIMaioria, analyzeTorresGemeas, analyzePadrao23, analyzeM1Trend } from './cataloger';
@@ -38,7 +39,6 @@ export const analyzeMarketAndSave = onSchedule({
         for (const strategy of currentStrategies) {
           const rawHistory = runCataloger(blocks, strategy.func, strategy.entryIndex);
           
-          // Filtra o histórico para os últimos 100 resultados
           const filteredHistory = rawHistory.slice(-100);
           const docId = `${pair}_${strategy.name.replace(/\s+/g, '')}_M${tf}`;
           
@@ -80,10 +80,25 @@ export const analyzeMarketAndSave = onSchedule({
       const lastResult = top1.rawHistory[top1.rawHistory.length - 1];
       const simRef = db.collection("stats").doc("global_simulator");
       const simSnap = await simRef.get();
-      const simData = simSnap.exists ? simSnap.data() : { bankroll: 5000, lastTradeId: '' };
+      const simData = simSnap.exists ? simSnap.data() : { bankroll: 5000, lastTradeId: '', lastPair: '' };
 
       const currentTradeId = `${top1.id}_${top1.rawHistory.length}`;
-      if (simData?.lastTradeId !== currentTradeId) {
+      
+      // Se o par mudou, apenas atualizamos quem é o líder atual sem gravar trade
+      if (simData && simData.lastPair !== top1.id) {
+        await simRef.set({
+          lastPair: top1.id,
+          lastTradeId: currentTradeId,
+          currentPair: top1.pair,
+          currentPattern: top1.pattern,
+          currentDirection: Math.random() > 0.5 ? 'COMPRADO' : 'VENDIDO',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        return;
+      }
+
+      // Se for o mesmo par e tiver um trade novo (história cresceu)
+      if (simData && simData.lastTradeId !== currentTradeId) {
         let profit = 0;
         if (lastResult === 0) { profit = 0.89; }
         else if (lastResult === 1) { profit = 0.78; }
@@ -91,8 +106,8 @@ export const analyzeMarketAndSave = onSchedule({
         else if (lastResult === -1 || lastResult > 2) { profit = -7; }
 
         if (lastResult !== null) {
-          const newBankroll = (simData?.bankroll || 5000) + profit;
-          const currentTrades = simData?.trades || [];
+          const newBankroll = (simData.bankroll || 5000) + profit;
+          const currentTrades = simData.trades || [];
           const newTrade = {
             pair: top1.pair,
             profit,
@@ -101,7 +116,6 @@ export const analyzeMarketAndSave = onSchedule({
             id: currentTradeId
           };
 
-          // Mantém apenas os últimos 49 para adicionar o novo e totalizar 50
           const updatedTrades = [...currentTrades.slice(-49), newTrade];
 
           await simRef.set({
