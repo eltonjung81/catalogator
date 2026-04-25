@@ -333,7 +333,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
               <p className={`text-2xl font-bold transition-colors duration-300 ${flashResult ? (flashResult.type === 'GAIN' ? 'text-emerald-300' : 'text-red-300') : 'text-white'}`}>
                 $ {displayedBankroll.toFixed(2)}
               </p>
-              {activeBet > 0 && (
+              {activeBet > 0 && !cycleOpClosed && (
                 <p className="text-amber-500/70 text-[10px] mt-1 font-mono">-${activeBet.toFixed(2)} em aberto</p>
               )}
             </div>
