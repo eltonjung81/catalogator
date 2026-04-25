@@ -70,6 +70,8 @@ interface SignalData {
 function App() {
   const { loading: authLoading, timeRemaining } = useAuth();
   const [signals, setSignals] = useState<SignalData[]>([]);
+  const [loadingData, setLoadingData] = useState(true);
+  
   // Filtros e UI
   const [lang, setLang] = useState<'pt' | 'en'>('pt');
   const [showWelcome, setShowWelcome] = useState(true);
