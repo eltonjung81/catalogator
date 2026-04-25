@@ -115,7 +115,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async () => {
     setLoading(true);
-    await loginWithGoogle();
+    try {
+      await loginWithGoogle();
+    } catch (error) {
+      console.error("Erro ao logar:", error);
+      setLoading(false);
+      alert("Erro ao fazer login com Google. Verifique se os pop-ups estão permitidos.");
+    }
   };
 
   useEffect(() => {
