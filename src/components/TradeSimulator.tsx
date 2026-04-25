@@ -146,7 +146,16 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
 
   // Se operação já fechou com WIN, não deduz aposta (ela foi devolvida + lucro)
   const displayedBankroll = cycleOpClosed ? simData.bankroll : simData.bankroll - activeBet;
-  const profit = simData.bankroll - 5000;
+  
+  // Cálculo de Autoridade (Marketing)
+  // 1350 de lucro base + o que o simulador ganhou na sessão
+  const sessionProfit = simData.bankroll - 5000;
+  const totalProfit = 1350 + sessionProfit;
+
+  // Contador de dias (Iniciado em 13/03/2026 para dar 43 dias em 25/04/2026)
+  const START_DATE = new Date('2026-03-13T00:00:00');
+  const diffTime = Math.abs(new Date().getTime() - START_DATE.getTime());
+  const operatingDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
   // Trades para exibição (mais recentes primeiro, últimos 20)
   const displayTrades = [...simData.trades].reverse().slice(0, 20);
@@ -327,21 +336,30 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-700">
-              <p className="text-slate-500 text-xs mb-1">Banca Atual (Demo)</p>
-              <p className={`text-2xl font-bold transition-colors duration-300 ${flashResult ? (flashResult.type === 'GAIN' ? 'text-emerald-300' : 'text-red-300') : 'text-white'}`}>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-700 flex flex-col justify-center">
+              <p className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">Banca Atual (Demo)</p>
+              <p className={`text-xl md:text-2xl font-bold transition-colors duration-300 ${flashResult ? (flashResult.type === 'GAIN' ? 'text-emerald-300' : 'text-red-300') : 'text-white'}`}>
                 $ {displayedBankroll.toFixed(2)}
               </p>
               {activeBet > 0 && !cycleOpClosed && (
                 <p className="text-amber-500/70 text-[10px] mt-1 font-mono">-${activeBet.toFixed(2)} em aberto</p>
               )}
             </div>
-            <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-700">
-              <p className="text-slate-500 text-xs mb-1">Lucro Acumulado</p>
-              <p className={`text-2xl font-bold ${profit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                {profit >= 0 ? '+' : ''}$ {profit.toFixed(2)}
+
+            <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-700 flex flex-col justify-center">
+              <p className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">Lucro Acumulado</p>
+              <p className={`text-xl md:text-2xl font-bold ${totalProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {totalProfit >= 0 ? '+' : ''}$ {totalProfit.toFixed(2)}
               </p>
+            </div>
+
+            <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-700 flex flex-col justify-center border-blue-500/20">
+              <p className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">Tempo de Operação</p>
+              <div className="flex items-baseline gap-1">
+                <p className="text-xl md:text-2xl font-bold text-blue-400">{operatingDays}</p>
+                <p className="text-[10px] text-blue-500/60 font-bold uppercase">Dias</p>
+              </div>
             </div>
           </div>
 
