@@ -78,6 +78,27 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
     return () => clearInterval(timer);
   }, [topSignal]);
 
+  const [flashResult, setFlashResult] = useState<{status: string, color: string} | null>(null);
+  const lastTradeIdRef = React.useRef<string | null>(null);
+
+  // Detecta conclusão de trade para o Flash de 1 segundo
+  useEffect(() => {
+    if (simData.trades.length > 0) {
+      const latestTrade = simData.trades[0];
+      if (lastTradeIdRef.current && lastTradeIdRef.current !== latestTrade.id) {
+        // Um novo trade acabou de ser concluído!
+        setFlashResult({
+          status: latestTrade.status,
+          color: latestTrade.profit > 0 ? 'text-emerald-400' : 'text-red-400'
+        });
+        
+        // Remove o flash após 1 segundo
+        setTimeout(() => setFlashResult(null), 1000);
+      }
+      lastTradeIdRef.current = latestTrade.id;
+    }
+  }, [simData.trades]);
+
   const profit = simData.bankroll - 5000;
 
   // Calcula o valor da aposta atual para descontar "ao vivo"
@@ -124,45 +145,47 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
             </div>
           </div>
 
-          <div className={`mt-6 p-4 rounded-xl flex items-center justify-between border transition-colors ${liveStatus.isEntering ? 'bg-amber-500/10 border-amber-500/30' : 'bg-blue-500/10 border-blue-500/20'}`}>
+          <div className={`mt-6 p-4 rounded-xl flex items-center justify-between border transition-all duration-300 ${flashResult ? 'bg-white/10 border-white/40 scale-[1.02]' : liveStatus.isEntering ? 'bg-amber-500/10 border-amber-500/30' : 'bg-blue-500/10 border-blue-500/20'}`}>
             <div className="flex items-center gap-3">
               <div className="relative">
-                <div className={`w-3 h-3 rounded-full animate-ping ${liveStatus.isEntering ? 'bg-amber-500' : 'bg-blue-500'}`}></div>
-                <div className={`absolute inset-0 w-3 h-3 rounded-full ${liveStatus.isEntering ? 'bg-amber-500' : 'bg-blue-500'}`}></div>
+                <div className={`w-3 h-3 rounded-full animate-ping ${flashResult ? 'bg-white' : liveStatus.isEntering ? 'bg-amber-500' : 'bg-blue-500'}`}></div>
+                <div className={`absolute inset-0 w-3 h-3 rounded-full ${flashResult ? 'bg-white' : liveStatus.isEntering ? 'bg-amber-500' : 'bg-blue-500'}`}></div>
               </div>
               <div>
-                <p className={`font-bold text-sm ${liveStatus.color}`}>
-                  {liveStatus.msg}
+                <p className={`font-bold text-sm ${flashResult ? flashResult.color + ' text-xl animate-bounce' : liveStatus.color}`}>
+                  {flashResult ? `RESULTADO: ${flashResult.status}!` : liveStatus.msg}
                 </p>
-                <p className="text-slate-500 text-xs">Sincronizado com o ciclo de 5 minutos da Binance</p>
+                <p className="text-slate-500 text-xs">
+                  {flashResult ? 'Operação encerrada e computada' : 'Sincronizado com o ciclo de 5 minutos da Binance'}
+                </p>
               </div>
             </div>
-            <TrendingUp className={liveStatus.isEntering ? 'text-amber-400/30' : 'text-blue-400/30'} size={32} />
+            <TrendingUp className={flashResult ? 'text-white' : liveStatus.isEntering ? 'text-amber-400/30' : 'text-blue-400/30'} size={32} />
           </div>
         </div>
 
         {/* Histórico de Trades Simulado */}
-        <div className="lg:w-80">
+        <div className="lg:w-96">
           <div className="flex items-center gap-2 text-slate-400 mb-4">
             <Zap size={18} />
-            <h3 className="font-semibold text-xs uppercase">Últimas Operações do Robô</h3>
+            <h3 className="font-semibold text-xs uppercase">Histórico de Operações</h3>
           </div>
           <div className="space-y-2 max-h-[160px] overflow-y-auto pr-2 custom-scrollbar">
             {simData.trades.map((trade, i) => (
-              <div key={i} className="flex items-center justify-between bg-slate-900/50 p-2 rounded-lg border border-slate-800 text-[11px]">
-                <div className="flex items-center gap-2">
-                  {trade.profit > 0 ? (
-                    <ArrowUpCircle size={14} className="text-emerald-500" />
-                  ) : (
-                    <ArrowDownCircle size={14} className="text-red-500" />
-                  )}
-                  <span className="text-white font-medium">{trade.pair}</span>
+              <div key={i} className="flex items-center justify-between bg-slate-900/50 p-2 rounded-lg border border-slate-800 text-[10px] hover:border-slate-600 transition-colors">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-white font-bold min-w-[65px]">{trade.pair}</span>
+                  <span className="text-slate-700">|</span>
+                  <span className={`font-bold min-w-[50px] ${trade.profit > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {trade.profit > 0 ? '+' : ''}{trade.profit.toFixed(2)}
+                  </span>
+                  <span className="text-slate-700">|</span>
+                  <span className="text-slate-500 italic">
+                    {new Date(trade.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
                 </div>
-                <span className={trade.profit > 0 ? 'text-emerald-400' : 'text-red-400'}>
-                  {trade.profit > 0 ? '+' : ''}{trade.profit.toFixed(2)}
-                </span>
-                <span className="text-slate-600 italic">
-                  {new Date(trade.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {trade.status}
+                <span className={`font-black px-2 py-0.5 rounded text-[9px] ${trade.profit > 0 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
+                  {trade.status}
                 </span>
               </div>
             ))}
