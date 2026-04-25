@@ -280,9 +280,21 @@ function App() {
         </div>
       </section>
 
-      {/* Simulador de Trades */}
-      {!loadingData && displaySignals.length > 0 && (
-        <TradeSimulator topSignal={displaySignals[0]} />
+      {/* Simulador de Trades - Fixo no Melhor de M5 */}
+      {!loadingData && signals.length > 0 && (
+        <TradeSimulator 
+          topSignal={signals
+            .filter(s => s.timeframe === 5)
+            .sort((a, b) => {
+              const getScore = (h: number[]) => {
+                const rec = h.slice(-100);
+                const wins = rec.filter(r => r >= 0 && r <= 2).length;
+                return wins;
+              };
+              return getScore(b.rawHistory) - getScore(a.rawHistory);
+            })[0] || null
+          } 
+        />
       )}
 
       {/* Grid */}

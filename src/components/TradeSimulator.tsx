@@ -71,9 +71,15 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
         
         {/* Painel de Banca */}
         <div className="flex-1">
-          <div className="flex items-center gap-2 text-blue-400 mb-4">
-            <Wallet size={20} />
-            <h2 className="font-bold uppercase tracking-wider text-sm">Simulador de Banca Real (Top #1)</h2>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2 text-blue-400">
+              <Wallet size={20} />
+              <h2 className="font-bold uppercase tracking-wider text-sm">Monitor de Alta Performance (Fixo M5)</h2>
+            </div>
+            <div className="bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-full flex items-center gap-2">
+              <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
+              <span className="text-emerald-400 text-[10px] font-bold uppercase">Robô Ativo 24h na Nuvem</span>
+            </div>
           </div>
           
           <div className="grid grid-cols-2 gap-4">
