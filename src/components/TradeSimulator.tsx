@@ -12,26 +12,35 @@ interface TradeSimulatorProps {
 }
 
 export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => {
-  const [simData, setSimData] = useState<{bankroll: number, trades: any[]}>({ bankroll: 5000, trades: [] });
-  
+  const [liveStatus, setLiveStatus] = useState<{msg: string, color: string, isEntering: boolean}>({
+    msg: 'Monitorando mercado...',
+    color: 'text-blue-400',
+    isEntering: false
+  });
+
+  const [simData, setSimData] = useState<{
+    bankroll: number, 
+    trades: any[], 
+    currentPair?: string, 
+    currentPattern?: string, 
+    currentDirection?: string
+  }>({ bankroll: 5000, trades: [] });
+
   useEffect(() => {
     const unsub = onSnapshot(doc(db, "stats", "global_simulator"), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setSimData({
           bankroll: data.bankroll || 5000,
-          trades: (data.trades || []).slice(-20).reverse()
+          trades: (data.trades || []).slice(-20).reverse(),
+          currentPair: data.currentPair,
+          currentPattern: data.currentPattern,
+          currentDirection: data.currentDirection
         });
       }
     });
     return () => unsub();
   }, []);
-
-  const [liveStatus, setLiveStatus] = useState<{msg: string, color: string, isEntering: boolean}>({
-    msg: 'Monitorando mercado...',
-    color: 'text-blue-400',
-    isEntering: false
-  });
 
   // Efeito de Ciclo de Operação em Tempo Real
   useEffect(() => {
@@ -40,22 +49,18 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
       const min = now.getMinutes();
       const cycleMin = min % 5;
 
-      // Gera uma semente estável para o bloco de 5 minutos atual
-      const blockTimestamp = Math.floor(now.getTime() / (5 * 60 * 1000));
-      // Usa o par e o bloco para decidir a direção (fixo por 5 min)
-      const directionSeed = (blockTimestamp + (topSignal?.pair.length || 0)) % 2;
-      const direction = directionSeed === 0 ? 'COMPRADO' : 'VENDIDO';
+      const direction = simData.currentDirection || 'ANALISANDO';
 
       if (cycleMin === 4) {
         setLiveStatus({
-          msg: `Padrão Detectado! Entrando ${direction} em ${topSignal?.pair} (${topSignal?.pattern}) na próxima vela...`,
+          msg: `Padrão Detectado! Entrando ${direction} em ${simData.currentPair || topSignal?.pair} (${simData.currentPattern || topSignal?.pattern}) na próxima vela...`,
           color: 'text-amber-400 animate-pulse',
           isEntering: true
         });
       } else if (cycleMin === 0 || cycleMin === 1 || cycleMin === 2) {
         const stage = cycleMin === 0 ? 'Mão Fixa' : `Gale ${cycleMin}`;
         setLiveStatus({
-          msg: `Operação em Andamento (${stage}): ${topSignal?.pair} - ${topSignal?.pattern} (${direction})`,
+          msg: `Operação em Andamento (${stage}): ${simData.currentPair || topSignal?.pair} - ${simData.currentPattern || topSignal?.pattern} (${direction})`,
           color: 'text-emerald-400',
           isEntering: false
         });

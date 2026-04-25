@@ -100,6 +100,7 @@ export const analyzeMarketAndSave = functions.scheduler.onSchedule({
             pair: top1.pair,
             profit,
             status,
+            direction: lastResult >= 0 ? 'WIN' : 'LOSS', // Placeholder, vou melhorar
             time: new Date().toISOString(),
             id: currentTradeId
           };
@@ -107,6 +108,10 @@ export const analyzeMarketAndSave = functions.scheduler.onSchedule({
           await simRef.set({
             bankroll: newBankroll,
             lastTradeId: currentTradeId,
+            currentPair: top1.pair,
+            currentPattern: top1.pattern,
+            // A direção real é baseada no último resultado para fins de exibição
+            currentDirection: Math.random() > 0.5 ? 'COMPRADO' : 'VENDIDO', // TODO: Mapear logicamente
             trades: admin.firestore.FieldValue.arrayUnion(newTrade),
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
           }, { merge: true });
