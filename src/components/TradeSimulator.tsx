@@ -42,27 +42,24 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
 
       if (cycleMin === 4) {
         // Padrão Formando (Último minuto do bloco)
-        const direction = Math.random() > 0.5 ? 'COMPRADO' : 'VENDIDO'; // Simulação de direção baseada no padrão
+        // Lógica simples para simular direção baseada no par (paridade do timestamp)
+        const direction = now.getTime() % 2 === 0 ? 'COMPRADO' : 'VENDIDO'; 
         setLiveStatus({
-          msg: `Padrão Detectado! Entrando ${direction} na próxima vela...`,
+          msg: `Padrão Detectado! Entrando ${direction} em ${topSignal?.pair} (${topSignal?.pattern}) na próxima vela...`,
           color: 'text-amber-400 animate-pulse',
           isEntering: true
         });
-      } else if (cycleMin === 0) {
+      } else if (cycleMin === 0 || cycleMin === 1 || cycleMin === 2) {
+        const stage = cycleMin === 0 ? 'Mão Fixa' : `Gale ${cycleMin}`;
+        const direction = now.getTime() % 2 === 0 ? 'COMPRADO' : 'VENDIDO';
         setLiveStatus({
-          msg: 'Operação em Andamento (Mão Fixa)...',
+          msg: `Operação em Andamento (${stage}): ${topSignal?.pair} - ${topSignal?.pattern} (${direction})`,
           color: 'text-emerald-400',
-          isEntering: false
-        });
-      } else if (cycleMin === 1) {
-        setLiveStatus({
-          msg: 'Operação em Andamento (Gale 1)...',
-          color: 'text-emerald-500',
           isEntering: false
         });
       } else {
         setLiveStatus({
-          msg: `Aguardando formação de padrão em ${topSignal?.pair}...`,
+          msg: `Monitorando ${topSignal?.pair} (${topSignal?.pattern})... Aguardando sinal.`,
           color: 'text-blue-400',
           isEntering: false
         });
