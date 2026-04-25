@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, signInAnonymously } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
 // TODO: Substituir pelas chaves reais do projeto no Firebase Console
@@ -18,6 +18,16 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 
 export const googleProvider = new GoogleAuthProvider();
+
+export const loginAnonymously = async () => {
+  try {
+    const userCredential = await signInAnonymously(auth);
+    return userCredential.user;
+  } catch (error) {
+    console.error("Erro ao fazer login anônimo:", error);
+    throw error;
+  }
+};
 
 export const loginWithGoogle = async () => {
   try {

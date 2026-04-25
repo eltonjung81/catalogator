@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { type User, onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { auth, loginWithGoogle, db } from '../lib/firebase';
+import { auth, loginWithGoogle, loginAnonymously, db } from '../lib/firebase';
 
 interface AuthContextType {
   user: User | null;
@@ -63,49 +63,57 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let remaining = 0;
 
     try {
-      let userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-      let isEligibleForTrial = true;
+      if (currentUser.isAnonymous) {
+        // Lógica para modo Anônimo (2 minutos)
+        const creationTime = new Date(currentUser.metadata.creationTime || Date.now()).getTime();
+        const trialDuration = 120; // 2 minutos em segundos
+        const trialElapsed = Math.floor((now - creationTime) / 1000);
+        remaining = trialElapsed < trialDuration ? trialDuration - trialElapsed : 0;
+      } else {
+        // Lógica para modo Google (20 minutos)
+        let userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+        let isEligibleForTrial = true;
 
-      // Se o usuário é novo (não tem doc), checa o IP
-      if (!userDoc.exists()) {
-        isEligibleForTrial = await checkIpEligibility(currentUser.uid);
+        if (!userDoc.exists()) {
+          isEligibleForTrial = await checkIpEligibility(currentUser.uid);
+          
+          await setDoc(doc(db, 'users', currentUser.uid), {
+            uid: currentUser.uid,
+            createdAt: new Date(),
+            trialStartedAt: isEligibleForTrial ? new Date() : null,
+            trialUsed: !isEligibleForTrial
+          });
+          userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+        }
+
+        const data = userDoc.data();
         
-        await setDoc(doc(db, 'users', currentUser.uid), {
-          uid: currentUser.uid,
-          createdAt: new Date(),
-          trialStartedAt: isEligibleForTrial ? new Date() : null,
-          trialUsed: !isEligibleForTrial
-        });
-        userDoc = await getDoc(doc(db, 'users', currentUser.uid)); // Recarrega
-      }
+        // 1. Check Google Trial (20 min)
+        if (data && data.trialStartedAt) {
+          const trialStart = data.trialStartedAt.toMillis ? data.trialStartedAt.toMillis() : data.trialStartedAt;
+          const trialDuration = 1200; // 20 minutos
+          const trialElapsed = Math.floor((now - trialStart) / 1000);
+          if (trialElapsed < trialDuration) {
+            remaining = trialDuration - trialElapsed;
+          }
+        }
 
-      const data = userDoc.data();
-      
-      // 1. Check Trial
-      if (data && data.trialStartedAt) {
-        const trialStart = data.trialStartedAt.toMillis ? data.trialStartedAt.toMillis() : data.trialStartedAt;
-        const trialDuration = 900; // 15 minutos
-        const trialElapsed = Math.floor((now - trialStart) / 1000);
-        if (trialElapsed < trialDuration) {
-          remaining = trialDuration - trialElapsed;
+        // 2. Check Premium (24h)
+        if (data && data.premiumUntil) {
+          const premiumUntil = data.premiumUntil.toMillis ? data.premiumUntil.toMillis() : data.premiumUntil;
+          const premiumRemaining = Math.floor((premiumUntil - now) / 1000);
+          if (premiumRemaining > 0) {
+            remaining = premiumRemaining;
+          }
         }
       }
-
-      // 2. Check Premium
-      if (data && data.premiumUntil) {
-        const premiumUntil = data.premiumUntil.toMillis ? data.premiumUntil.toMillis() : data.premiumUntil;
-        const premiumRemaining = Math.floor((premiumUntil - now) / 1000);
-        if (premiumRemaining > 0) {
-          remaining = premiumRemaining;
-        }
-      }
-
     } catch (error) {
       console.error("Error fetching user data:", error);
     }
 
     setTimeRemaining(remaining);
   };
+
 
   const refreshPremiumStatus = async () => {
     if (user) {
@@ -126,11 +134,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser && !currentUser.isAnonymous) {
+      if (currentUser) {
         setUser(currentUser);
         await calculateRemainingTime(currentUser);
       } else {
-        setUser(null);
+        await loginAnonymously();
       }
       setLoading(false);
     });
