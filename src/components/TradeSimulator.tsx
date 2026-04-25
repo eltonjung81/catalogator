@@ -161,7 +161,9 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
                 <span className={trade.profit > 0 ? 'text-emerald-400' : 'text-red-400'}>
                   {trade.profit > 0 ? '+' : ''}{trade.profit.toFixed(2)}
                 </span>
-                <span className="text-slate-600 italic">{trade.status}</span>
+                <span className="text-slate-600 italic">
+                  {new Date(trade.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {trade.status}
+                </span>
               </div>
             ))}
           </div>

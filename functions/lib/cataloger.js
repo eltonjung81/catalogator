@@ -135,7 +135,9 @@ const runCataloger = (blocks, patternAnalyzer, entryCandleIndex = 0 // 0 = 1ª v
             continue;
         }
         let result = -1;
-        for (let attempt = 0; attempt <= 3; attempt++) {
+        let isDetermined = false;
+        // Avalia até Gale 2 (tentativas 0, 1 e 2)
+        for (let attempt = 0; attempt <= 2; attempt++) {
             let tradeCandle;
             // No M5 (bloco > 1), a tentativa pode estar dentro do bloco
             if (entryCandleIndex + attempt < currentBlock.length) {
@@ -148,12 +150,27 @@ const runCataloger = (blocks, patternAnalyzer, entryCandleIndex = 0 // 0 = 1ª v
                     tradeCandle = blocks[nextBlockIdx][0];
                 }
             }
-            if (tradeCandle && tradeCandle.color === prediction) {
-                result = attempt;
+            // Se a vela da tentativa ainda não fechou (não existe no array),
+            // a operação ainda está em andamento. Não podemos dizer se é HIT ou GAIN.
+            if (!tradeCandle) {
                 break;
             }
+            // Se deu Win
+            if (tradeCandle.color === prediction) {
+                result = attempt;
+                isDetermined = true;
+                break;
+            }
+            // Se chegou no limite de Gales (2) e não deu Win, é HIT definitivo
+            if (attempt === 2) {
+                result = -1;
+                isDetermined = true;
+            }
         }
-        history.push(result);
+        // Só adiciona ao histórico se tiver finalizado (Win ou Loss final)
+        if (isDetermined) {
+            history.push(result);
+        }
     }
     return history;
 };
