@@ -338,7 +338,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-700 flex flex-col justify-center">
-              <p className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">Banca Atual (Demo)</p>
+              <p className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">Banca Atual (Real)</p>
               <p className={`text-xl md:text-2xl font-bold transition-colors duration-300 ${flashResult ? (flashResult.type === 'GAIN' ? 'text-emerald-300' : 'text-red-300') : 'text-white'}`}>
                 $ {displayedBankroll.toFixed(2)}
               </p>
