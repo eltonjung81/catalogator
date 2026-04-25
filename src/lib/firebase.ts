@@ -19,9 +19,14 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;
 
-export const trackEvent = (eventName: string, params?: object) => {
+export const trackEvent = (eventName: string, params?: any) => {
+  // Envia para o Firebase Analytics
   if (analytics) {
     logEvent(analytics, eventName, params);
+  }
+  // Envia para o GA4 via gtag.js (seu novo ID)
+  if (typeof window !== 'undefined' && (window as any).gtag) {
+    (window as any).gtag('event', eventName, params);
   }
 };
 
