@@ -38,7 +38,17 @@ const translations = {
     loginBody: 'Faça login com o Google para liberar seus 15 minutos de acesso gratuito e começar a lucrar com nossas IAs.',
     loginBtn: 'Ganhar +20 Minutos Grátis',
     lockPremiumTitle: 'Acesso Premium Expirado 💎',
-    lockPremiumBody: 'Seu tempo de 20 minutos acabou. Para continuar lucrando 24h por dia, escolha seu método de pagamento.'
+    lockPremiumBody: 'Seu tempo de 20 minutos acabou. Para continuar lucrando 24h por dia, escolha seu método de pagamento.',
+    m1: '1 Minuto (M1)',
+    m5: '5 Minutos (M5)',
+    activeRobot: 'Robô Ativo 24h',
+    immediateRelease: 'A liberação é imediata após a confirmação do pagamento.',
+    monitorTitle: 'Monitor de Alta Performance (M5)',
+    bankrollLabel: 'Banca Atual (Real)',
+    profitLabel: 'Lucro Acumulado',
+    timeLabel: 'Tempo de Operação',
+    daysLabel: 'Dias',
+    historyTitle: 'Histórico de Operações'
   },
   en: {
     title: 'Probabilistic Cataloger',
@@ -68,7 +78,17 @@ const translations = {
     loginBody: 'Log in with Google to unlock your 15 minutes of free access and start profiting with our AI.',
     loginBtn: 'Get +20 Free Minutes',
     lockPremiumTitle: 'Premium Access Expired 💎',
-    lockPremiumBody: 'Your 20-minute trial has ended. To continue profiting 24/7, please choose your payment method.'
+    lockPremiumBody: 'Your 20-minute trial has ended. To continue profiting 24/7, please choose your payment method.',
+    m1: '1 Minute (M1)',
+    m5: '5 Minutes (M5)',
+    activeRobot: 'Robot Active 24/7',
+    immediateRelease: 'Access is released immediately after payment confirmation.',
+    monitorTitle: 'High Performance Monitor (M5)',
+    bankrollLabel: 'Current Bankroll (Real)',
+    profitLabel: 'Accumulated Profit',
+    timeLabel: 'Operating Time',
+    daysLabel: 'Days',
+    historyTitle: 'Trade History'
   }
 };
 
@@ -284,7 +304,7 @@ function App() {
                   {paymentMethod === 'paypal' ? <PayPalPayment /> : <MercadoPagoPayment />}
                   
                   <p className="text-xs text-slate-500 mt-6">
-                    A liberação é imediata após a confirmação do pagamento.
+                    {t.immediateRelease}
                   </p>
                 </>
               )}
@@ -352,8 +372,8 @@ function App() {
               value={selectedTimeframe}
               onChange={(e) => setSelectedTimeframe(Number(e.target.value))}
             >
-              <option value={1}>1 Minuto (M1)</option>
-              <option value={5}>5 Minutos (M5)</option>
+              <option value={1}>{t.m1}</option>
+              <option value={5}>{t.m5}</option>
             </select>
           </div>
 
@@ -378,6 +398,7 @@ function App() {
           <TradeSimulator
             topSignal={displaySignals.find(s => s.timeframe === 5) || null}
             galeLimit={galeLimit}
+            lang={lang}
           />
         )}
 
@@ -402,6 +423,7 @@ function App() {
                 galeLimit={galeLimit}
                 timeframe={selectedTimeframe}
                 updatedAt={signal.updatedAt}
+                lang={lang}
               />
             ))
           )}

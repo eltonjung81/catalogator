@@ -9,7 +9,55 @@ interface SignalCardProps {
   galeLimit: number;
   timeframe: number;
   updatedAt?: any; // Firestore Timestamp
+  lang: 'pt' | 'en';
 }
+
+const cardTranslations = {
+  pt: {
+    now: 'agora',
+    minAgo: 'min atrás',
+    hourAgo: 'h atrás',
+    updated: 'Atualizado',
+    performanceTitle: 'Desempenho por Entrada',
+    direct: 'Direto',
+    loss: 'Loss',
+    viewDetails: 'Ver detalhes da estratégia',
+    logicTitle: 'Lógica da Estratégia',
+    closeBtn: 'Fechar Explicação',
+    mhi1Desc: 'Analisa as 3 últimas velas de um quadrante de 5 minutos.',
+    mhi1Logic: 'Entrada na cor da MINORIA dessas 3 velas para a próxima vela.',
+    mhiMaioriaDesc: 'Analisa as 3 últimas velas de um quadrante de 5 minutos.',
+    mhiMaioriaLogic: 'Entrada na cor da MAIORIA dessas 3 velas para a próxima vela.',
+    torresDesc: 'Compara a primeira vela do quadrante com a última.',
+    torresLogic: 'A entrada deve ser da COR OPOSTA à primeira vela do quadrante.',
+    padrao23Desc: 'Analisa a segunda e terceira vela do quadrante.',
+    padrao23Logic: 'Se a 2ª e 3ª forem iguais, entra para a mesma cor.',
+    trendDesc: 'Estratégia de seguimento de fluxo em 1 minuto.',
+    trendLogic: 'Entrada para a MESMA COR da vela anterior (Continuidade).'
+  },
+  en: {
+    now: 'now',
+    minAgo: 'min ago',
+    hourAgo: 'h ago',
+    updated: 'Updated',
+    performanceTitle: 'Performance by Entry',
+    direct: 'Direct',
+    loss: 'Loss',
+    viewDetails: 'View strategy details',
+    logicTitle: 'Strategy Logic',
+    closeBtn: 'Close Explanation',
+    mhi1Desc: 'Analyzes the last 3 candles of a 5-minute quadrant.',
+    mhi1Logic: 'Entry on the MINORITY color of these 3 candles for the next candle.',
+    mhiMaioriaDesc: 'Analyzes the last 3 candles of a 5-minute quadrant.',
+    mhiMaioriaLogic: 'Entry on the MAJORITY color of these 3 candles for the next candle.',
+    torresDesc: 'Compares the first candle of the quadrant with the last one.',
+    torresLogic: 'The entry must be of the OPPOSITE COLOR to the first candle.',
+    padrao23Desc: 'Analyzes the second and third candle of the quadrant.',
+    padrao23Logic: 'If the 2nd and 3rd are the same, enters for the same color.',
+    trendDesc: 'Flow following strategy in 1 minute.',
+    trendLogic: 'Entry for the SAME COLOR as the previous candle (Continuity).'
+  }
+};
 
 /**
  * Normaliza um valor de rawHistory para número puro.
@@ -24,7 +72,8 @@ const normalizeResult = (r: any): number => {
 /**
  * Converte um Firestore Timestamp (ou Date) para string "X min atrás".
  */
-const getTimeAgo = (updatedAt: any): string => {
+const getTimeAgo = (updatedAt: any, lang: 'pt' | 'en'): string => {
+  const t = cardTranslations[lang];
   if (!updatedAt) return '';
   let date: Date;
   if (typeof updatedAt.toDate === 'function') {
@@ -36,14 +85,15 @@ const getTimeAgo = (updatedAt: any): string => {
   }
   const diffMs = Date.now() - date.getTime();
   const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return 'agora';
-  if (diffMin === 1) return '1 min atrás';
-  if (diffMin < 60) return `${diffMin} min atrás`;
+  if (diffMin < 1) return t.now;
+  if (diffMin === 1) return `1 ${t.minAgo}`;
+  if (diffMin < 60) return `${diffMin} ${t.minAgo}`;
   const diffH = Math.floor(diffMin / 60);
-  return `${diffH}h atrás`;
+  return `${diffH}${t.hourAgo}`;
 };
 
-export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistory, galeLimit, updatedAt }) => {
+export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistory, galeLimit, updatedAt, lang }) => {
+  const t = cardTranslations[lang];
   // Recalcula estatísticas localmente
   // CORRIGIDO: normaliza rawHistory antes de processar para suportar {result,time}
   const stats = useMemo(() => {
@@ -98,28 +148,28 @@ export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistor
   const getPatternDescription = (name: string) => {
     const descriptions: Record<string, { desc: string, logic: string, candles: string[] }> = {
       'MHI 1': {
-        desc: 'Analisa as 3 últimas velas de um quadrante de 5 minutos.',
-        logic: 'Entrada na cor da MINORIA dessas 3 velas para a próxima vela.',
+        desc: t.mhi1Desc,
+        logic: t.mhi1Logic,
         candles: ['bg-slate-600', 'bg-slate-600', 'bg-green-500', 'bg-red-500', 'bg-red-500', 'bg-green-500']
       },
       'MHI Maioria': {
-        desc: 'Analisa as 3 últimas velas de um quadrante de 5 minutos.',
-        logic: 'Entrada na cor da MAIORIA dessas 3 velas para a próxima vela.',
+        desc: t.mhiMaioriaDesc,
+        logic: t.mhiMaioriaLogic,
         candles: ['bg-slate-600', 'bg-slate-600', 'bg-green-500', 'bg-red-500', 'bg-red-500', 'bg-red-500']
       },
       'Torres Gêmeas': {
-        desc: 'Compara a primeira vela do quadrante com a última.',
-        logic: 'A entrada deve ser da COR OPOSTA à primeira vela do quadrante.',
+        desc: t.torresDesc,
+        logic: t.torresLogic,
         candles: ['bg-green-500', 'bg-slate-600', 'bg-slate-600', 'bg-slate-600', 'bg-red-500']
       },
       'Padrão 23': {
-        desc: 'Analisa a segunda e terceira vela do quadrante.',
-        logic: 'Se a 2ª e 3ª forem iguais, entra para a mesma cor.',
+        desc: t.padrao23Desc,
+        logic: t.padrao23Logic,
         candles: ['bg-slate-600', 'bg-green-500', 'bg-green-500', 'bg-slate-600', 'bg-green-500']
       },
       'Tendência M1': {
-        desc: 'Estratégia de seguimento de fluxo em 1 minuto.',
-        logic: 'Entrada para a MESMA COR da vela anterior (Continuidade).',
+        desc: t.trendDesc,
+        logic: t.trendLogic,
         candles: ['bg-green-500', 'bg-green-500']
       }
     };
@@ -129,7 +179,7 @@ export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistor
   const patternInfo = getPatternDescription(pattern);
   const last20Blocks = stats.visualBlocks.slice(-20);
   const isUpTrend = stats.recentScoreDelta >= 0;
-  const timeAgo = getTimeAgo(updatedAt);
+  const timeAgo = getTimeAgo(updatedAt, lang);
 
   // Cor do winRate: ≥85% verde, ≥70% amarelo, <70% vermelho
   const winRateColor =
@@ -157,14 +207,14 @@ export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistor
         {timeAgo && (
           <div className="flex items-center gap-1 mb-2">
             <Clock size={9} className="text-slate-600" />
-            <span className="text-[9px] text-slate-600 font-medium">Atualizado {timeAgo}</span>
+            <span className="text-[9px] text-slate-600 font-medium">{t.updated} {timeAgo}</span>
           </div>
         )}
 
-        <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-2 font-bold">Desempenho por Entrada</p>
+        <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-2 font-bold">{t.performanceTitle}</p>
         <div className="flex justify-between text-xs text-slate-400 mb-2 text-center border-b border-slate-700 pb-2">
           <div>
-            <p className="font-semibold text-slate-300 text-[9px] uppercase">Direto</p>
+            <p className="font-semibold text-slate-300 text-[9px] uppercase">{t.direct}</p>
             <p className="text-emerald-400 text-sm font-bold">{stats.winDirect}</p>
           </div>
           {galeLimit >= 1 && (
@@ -186,7 +236,7 @@ export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistor
             </div>
           )}
           <div>
-            <p className="font-semibold text-slate-300 text-[9px] uppercase">Loss</p>
+            <p className="font-semibold text-slate-300 text-[9px] uppercase">{t.loss}</p>
             <p className="text-red-500 text-sm font-bold">{stats.hit}</p>
           </div>
         </div>
@@ -215,7 +265,7 @@ export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistor
         <div
           onClick={() => setShowDetails(true)}
           className="h-14 w-16 bg-slate-700/30 rounded flex items-end justify-center gap-[2px] p-1 cursor-pointer hover:bg-slate-700/50 transition-colors border border-slate-700/50"
-          title="Ver detalhes da estratégia"
+          title={t.viewDetails}
         >
           {patternInfo.candles.slice(0, 5).map((color, i) => (
             <div key={i} className={`w-1.5 rounded-full ${color}`} style={{ height: `${20 + (i * 5)}%` }}></div>
@@ -228,7 +278,7 @@ export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistor
         <div className="fixed inset-0 z-[100] bg-slate-900/95 backdrop-blur-xl flex items-center justify-center p-4">
           <div className="bg-slate-800 border border-slate-700 p-8 rounded-3xl max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
             <h2 className="text-2xl font-bold text-white mb-2">{pattern}</h2>
-            <p className="text-blue-400 text-sm font-semibold mb-6 uppercase tracking-wider">Lógica da Estratégia</p>
+            <p className="text-blue-400 text-sm font-semibold mb-6 uppercase tracking-wider">{t.logicTitle}</p>
 
             <div className="bg-slate-900 p-6 rounded-2xl flex items-end justify-center gap-2 mb-8 h-32 border border-slate-700">
               {patternInfo.candles.map((color, i) => (
@@ -255,7 +305,7 @@ export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistor
               onClick={() => setShowDetails(false)}
               className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-4 rounded-2xl transition-all"
             >
-              Fechar Explicação
+              {t.closeBtn}
             </button>
           </div>
         </div>
