@@ -106,6 +106,13 @@ export const analyzePadrao23 = (previousBlock: Candle[]): 'GREEN' | 'RED' | null
   return candle2.color !== 'DOJI' ? candle2.color : null;
 };
 
+// Nova estratégia para Timeframe de 1 Minuto
+export const analyzeM1Trend = (candles: Candle[]): 'GREEN' | 'RED' | null => {
+  if (candles.length < 1) return null;
+  const lastCandle = candles[candles.length - 1];
+  return lastCandle.color !== 'DOJI' ? lastCandle.color : null;
+};
+
 // ============================================================================
 // SIMULADOR DE HISTÓRICO
 // Roda o padrão contra os blocos recentes e extrai a sequência crua de resultados
@@ -132,8 +139,8 @@ export const runCataloger = (
     const prevBlock = blocks[i - 1];
     const currentBlock = blocks[i];
 
-    // Se os blocos não estiverem completos (falha na API), pula
-    if (prevBlock.length < 5 || currentBlock.length < 5) {
+    // Removemos a trava de 5 velas para suportar M1
+    if (prevBlock.length < 1 || currentBlock.length < 1) {
       history.push(null);
       continue;
     }
@@ -151,8 +158,8 @@ export const runCataloger = (
     for (let attempt = 0; attempt <= 3; attempt++) {
       const targetIndex = entryCandleIndex + attempt;
       
-      // Se estourar as 5 velas do bloco, para de tentar
-      if (targetIndex >= 5) break; 
+      // Ajuste dinâmico para o tamanho do bloco atual
+      if (targetIndex >= currentBlock.length) break; 
       
       const tradeCandle = currentBlock[targetIndex];
       

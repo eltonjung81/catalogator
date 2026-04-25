@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.runCataloger = exports.analyzePadrao23 = exports.analyzeTorresGemeas = exports.analyzeMHIMaioria = exports.analyzeMHI1 = exports.groupInBlocks = exports.fetchCandles = void 0;
+exports.runCataloger = exports.analyzeM1Trend = exports.analyzePadrao23 = exports.analyzeTorresGemeas = exports.analyzeMHIMaioria = exports.analyzeMHI1 = exports.groupInBlocks = exports.fetchCandles = void 0;
 const axios_1 = require("axios");
 // Retorna as últimas N velas de M1 de um par da Binance
 const fetchCandles = async (symbol, interval = '1m', limit = 720) => {
@@ -98,6 +98,14 @@ const analyzePadrao23 = (previousBlock) => {
     return candle2.color !== 'DOJI' ? candle2.color : null;
 };
 exports.analyzePadrao23 = analyzePadrao23;
+// Nova estratégia para Timeframe de 1 Minuto
+const analyzeM1Trend = (candles) => {
+    if (candles.length < 1)
+        return null;
+    const lastCandle = candles[candles.length - 1];
+    return lastCandle.color !== 'DOJI' ? lastCandle.color : null;
+};
+exports.analyzeM1Trend = analyzeM1Trend;
 // ============================================================================
 // SIMULADOR DE HISTÓRICO
 // Roda o padrão contra os blocos recentes e extrai a sequência crua de resultados
@@ -116,8 +124,8 @@ const runCataloger = (blocks, patternAnalyzer, entryCandleIndex = 0 // 0 = 1ª v
     for (let i = 1; i < blocks.length; i++) {
         const prevBlock = blocks[i - 1];
         const currentBlock = blocks[i];
-        // Se os blocos não estiverem completos (falha na API), pula
-        if (prevBlock.length < 5 || currentBlock.length < 5) {
+        // Removemos a trava de 5 velas para suportar M1
+        if (prevBlock.length < 1 || currentBlock.length < 1) {
             history.push(null);
             continue;
         }
@@ -130,8 +138,8 @@ const runCataloger = (blocks, patternAnalyzer, entryCandleIndex = 0 // 0 = 1ª v
         // Tenta até o Gale 3 (são até 4 tentativas no total)
         for (let attempt = 0; attempt <= 3; attempt++) {
             const targetIndex = entryCandleIndex + attempt;
-            // Se estourar as 5 velas do bloco, para de tentar
-            if (targetIndex >= 5)
+            // Ajuste dinâmico para o tamanho do bloco atual
+            if (targetIndex >= currentBlock.length)
                 break;
             const tradeCandle = currentBlock[targetIndex];
             if (tradeCandle.color === prediction) {
