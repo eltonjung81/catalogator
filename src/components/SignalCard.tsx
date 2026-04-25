@@ -6,9 +6,10 @@ interface SignalCardProps {
   pattern: string;
   rawHistory: number[]; // 0=Win, 1=G1, 2=G2, 3=G3, -1=Hit
   galeLimit: number; // Filtro do usuário
+  timeframe: number;
 }
 
-export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistory, galeLimit }) => {
+export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistory, galeLimit, timeframe }) => {
   // Recalcula estatísticas localmente
   const stats = useMemo(() => {
     let winDirect = 0;
@@ -54,6 +55,16 @@ export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistor
 
     return { winDirect, g1, g2, g3, hit, winRate, totalTrades, visualBlocks, trendData, recentScoreDelta };
   }, [rawHistory, galeLimit]);
+
+  // Calcula o tempo que 100 trades representam
+  const timeContext = useMemo(() => {
+    const totalMinutes = 100 * (rawHistory.length > 0 ? (rawHistory.length >= 100 ? 100 : rawHistory.length) : 0); 
+    // Simplificação: Cada trade no M5 = 5min, M1 = 1min. 
+    // Como o rawHistory já vem filtrado pelo timeframe, podemos inferir.
+    const isM1 = rawHistory.length > 500; // Heurística simples se não passar o TF
+    // Mas é melhor passar o timeframe como prop. Vou assumir que o usuário quer ver o contexto.
+    return ""; // Vou ajustar abaixo passando o TF como prop
+  }, [rawHistory]);
 
   const [showDetails, setShowDetails] = React.useState(false);
 
@@ -101,38 +112,42 @@ export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistor
             <h3 className="text-white font-bold">{pair}</h3>
           </div>
           <div className="text-right">
-            <p className="text-slate-400 text-sm font-semibold">{pattern}</p>
+            <p className="text-slate-400 text-xs font-medium italic mb-1">
+              Últimas {(100 * timeframe / 60).toFixed(1)}h de análise
+            </p>
+            <p className="text-slate-400 text-sm font-bold">{pattern}</p>
             <p className={`font-bold text-lg ${stats.winRate >= 85 ? 'text-emerald-400' : 'text-amber-400'}`}>
               {stats.winRate}%
             </p>
           </div>
         </div>
 
+        <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-2 font-bold">Desempenho por Entrada</p>
         <div className="flex justify-between text-xs text-slate-400 mb-2 text-center border-b border-slate-700 pb-2">
           <div>
-            <p className="font-semibold text-slate-300">WIN</p>
+            <p className="font-semibold text-slate-300 text-[9px] uppercase">Direto</p>
             <p className="text-emerald-400 text-sm font-bold">{stats.winDirect}</p>
           </div>
           {galeLimit >= 1 && (
             <div>
-              <p className="font-semibold text-slate-300">G1</p>
+              <p className="font-semibold text-slate-300 text-[9px] uppercase">Gale 1</p>
               <p className="text-emerald-500 text-sm font-bold">{stats.g1}</p>
             </div>
           )}
           {galeLimit >= 2 && (
             <div>
-              <p className="font-semibold text-slate-300">G2</p>
+              <p className="font-semibold text-slate-300 text-[9px] uppercase">Gale 2</p>
               <p className="text-emerald-600 text-sm font-bold">{stats.g2}</p>
             </div>
           )}
           {galeLimit >= 3 && (
             <div>
-              <p className="font-semibold text-slate-300">G3</p>
+              <p className="font-semibold text-slate-300 text-[9px] uppercase">Gale 3</p>
               <p className="text-emerald-700 text-sm font-bold">{stats.g3}</p>
             </div>
           )}
           <div>
-            <p className="font-semibold text-slate-300">HIT</p>
+            <p className="font-semibold text-slate-300 text-[9px] uppercase">Loss</p>
             <p className="text-red-500 text-sm font-bold">{stats.hit}</p>
           </div>
         </div>

@@ -299,6 +299,7 @@ function App() {
               pattern={signal.pattern}
               rawHistory={signal.rawHistory || []}
               galeLimit={galeLimit}
+              timeframe={selectedTimeframe}
             />
           ))
         )}
