@@ -56,16 +56,6 @@ export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistor
     return { winDirect, g1, g2, g3, hit, winRate, totalTrades, visualBlocks, trendData, recentScoreDelta };
   }, [rawHistory, galeLimit]);
 
-  // Calcula o tempo que 100 trades representam
-  const timeContext = useMemo(() => {
-    const totalMinutes = 100 * (rawHistory.length > 0 ? (rawHistory.length >= 100 ? 100 : rawHistory.length) : 0); 
-    // Simplificação: Cada trade no M5 = 5min, M1 = 1min. 
-    // Como o rawHistory já vem filtrado pelo timeframe, podemos inferir.
-    const isM1 = rawHistory.length > 500; // Heurística simples se não passar o TF
-    // Mas é melhor passar o timeframe como prop. Vou assumir que o usuário quer ver o contexto.
-    return ""; // Vou ajustar abaixo passando o TF como prop
-  }, [rawHistory]);
-
   const [showDetails, setShowDetails] = React.useState(false);
 
   const getPatternDescription = (name: string) => {
