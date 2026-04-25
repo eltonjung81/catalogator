@@ -280,20 +280,10 @@ function App() {
         </div>
       </section>
 
-      {/* Simulador de Trades - Fixo no Melhor de M5 */}
+      {/* Simulador de Trades - Fixo no Melhor de M5 seguindo a ordenação oficial */}
       {!loadingData && signals.length > 0 && (
         <TradeSimulator 
-          topSignal={signals
-            .filter(s => s.timeframe === 5)
-            .sort((a, b) => {
-              const getScore = (h: number[]) => {
-                const rec = h.slice(-100);
-                const wins = rec.filter(r => r >= 0 && r <= 2).length;
-                return wins;
-              };
-              return getScore(b.rawHistory) - getScore(a.rawHistory);
-            })[0] || null
-          } 
+          topSignal={displaySignals.find(s => s.timeframe === 5) || null} 
         />
       )}
 
