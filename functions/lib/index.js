@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.analyzeMarketAndSave = void 0;
-// Robot Version 2.0 - Stable Leader Logic
+// Robot Version 3.0 - Full Logic Overhaul
 const admin = require("firebase-admin");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const cataloger_1 = require("./cataloger");
@@ -17,13 +17,37 @@ const M5_STRATEGIES = [
 const M1_STRATEGIES = [
     { name: 'Tendência M1', func: cataloger_1.analyzeM1Trend, entryIndex: 0 }
 ];
+/**
+ * Calcula o lucro líquido de uma operação com Martingale.
+ * Modelo de aposta: Mão Fixa=$1, G1=$2, G2=$4 (escala 1-2-4)
+ * Payout da corretora: 89% sobre o valor apostado.
+ *
+ * result = 0  → WIN Direto: +$0.89 (apostou $1, recebeu $1.89, lucro=$0.89)
+ * result = 1  → WIN G1: apostou $1+$2=$3, recebeu $2*1.89=$3.78, lucro=$0.78
+ * result = 2  → WIN G2: apostou $1+$2+$4=$7, recebeu $4*1.89=$7.56, lucro=$0.56
+ * result = -1 → HIT: perdeu tudo que apostou = -$7 (G2 coberto)
+ */
+const calcProfit = (result) => {
+    if (result === 0)
+        return { profit: 0.89, status: 'WIN DIRETO' };
+    if (result === 1)
+        return { profit: 0.78, status: 'WIN GALE 1' };
+    if (result === 2)
+        return { profit: 0.56, status: 'WIN GALE 2' };
+    // Loss: perdeu as 3 apostas (1 + 2 + 4 = 7)
+    return { profit: -7, status: 'LOSS' };
+};
 exports.analyzeMarketAndSave = (0, scheduler_1.onSchedule)({
     region: 'southamerica-east1',
     schedule: "every 1 minutes",
     timeoutSeconds: 300,
     memory: "512MiB"
 }, async () => {
+    var _a, _b, _c;
     console.log("Iniciando catalogação massiva via Binance...");
+    // ============================================================
+    // FASE 1: Catalogar todos os pares e salvar sinais
+    // ============================================================
     for (const pair of PAIRS) {
         for (const tf of [1, 5]) {
             try {
@@ -51,78 +75,92 @@ exports.analyzeMarketAndSave = (0, scheduler_1.onSchedule)({
             }
         }
     }
-    // Lógica do Simulador Global Persistente (M5 Top 1)
+    // ============================================================
+    // FASE 2: Simulador Global Persistente (Top 1 de M5)
+    // ============================================================
     try {
         const allM5Signals = await db.collection("signals")
             .where("timeframe", "==", 5)
             .get();
         const signalsData = allM5Signals.docs.map(doc => doc.data());
-        const sorted = signalsData.sort((a, b) => {
-            const getScore = (h) => {
-                const rec = h.slice(-100);
-                const wins = rec.filter(r => r >= 0 && r <= 2).length;
-                const trend = h.slice(-10).reduce((acc, curr) => acc + (curr >= 0 ? 1 : -2), 0);
-                return wins + (trend * 10);
-            };
-            return getScore(b.rawHistory) - getScore(a.rawHistory);
-        });
+        // Mesma lógica de ranking do frontend: TrendScore + WinRate
+        const getScore = (h) => {
+            if (!h || h.length === 0)
+                return -9999;
+            const recent100 = h.slice(-100);
+            let wins = 0;
+            let trendScore = 0;
+            recent100.forEach((r, idx) => {
+                var _a;
+                const val = typeof r === 'number' ? r : ((_a = r === null || r === void 0 ? void 0 : r.result) !== null && _a !== void 0 ? _a : -1);
+                const isWin = val >= 0 && val <= 2; // 0=direto, 1=G1, 2=G2
+                if (isWin)
+                    wins++;
+                if (idx >= recent100.length - 10) {
+                    trendScore += isWin ? 1 : -2;
+                }
+            });
+            const winRate = recent100.length > 0 ? wins / recent100.length : 0;
+            return (trendScore * 10) + winRate * 100;
+        };
+        const sorted = signalsData
+            .filter(s => s.rawHistory && s.rawHistory.length > 0)
+            .sort((a, b) => getScore(b.rawHistory) - getScore(a.rawHistory));
         const top1 = sorted[0];
-        if (top1 && top1.rawHistory && top1.rawHistory.length > 0) {
-            const lastResult = top1.rawHistory[top1.rawHistory.length - 1];
-            const simRef = db.collection("stats").doc("global_simulator");
-            const simSnap = await simRef.get();
-            const simData = simSnap.exists ? simSnap.data() : { bankroll: 5000, lastTradeId: '', lastPair: '' };
-            const currentTradeId = `${top1.id}_${top1.rawHistory.length}`;
-            // Se o par mudou, apenas atualizamos quem é o líder atual sem gravar trade
-            if (simData && simData.lastPair !== top1.id) {
-                await simRef.set({
-                    lastPair: top1.id,
-                    lastTradeId: currentTradeId,
-                    currentPair: top1.pair,
-                    currentPattern: top1.pattern,
-                    currentDirection: Math.random() > 0.5 ? 'COMPRADO' : 'VENDIDO',
-                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
-                }, { merge: true });
-                return;
-            }
-            // Se for o mesmo par e tiver um trade novo (história cresceu)
-            if (simData && simData.lastTradeId !== currentTradeId) {
-                let profit = 0;
-                if (lastResult === 0) {
-                    profit = 0.89;
-                }
-                else if (lastResult === 1) {
-                    profit = 0.78;
-                }
-                else if (lastResult === 2) {
-                    profit = 0.56;
-                }
-                else if (lastResult === -1 || lastResult > 2) {
-                    profit = -7;
-                }
-                if (lastResult !== null) {
-                    const newBankroll = (simData.bankroll || 5000) + profit;
-                    const currentTrades = simData.trades || [];
-                    const newTrade = {
-                        pair: top1.pair,
-                        profit,
-                        status: lastResult >= 0 && lastResult <= 2 ? 'GAIN' : 'HIT',
-                        time: new Date().toISOString(),
-                        id: currentTradeId
-                    };
-                    const updatedTrades = [...currentTrades.slice(-49), newTrade];
-                    await simRef.set({
-                        bankroll: newBankroll,
-                        lastTradeId: currentTradeId,
-                        currentPair: top1.pair,
-                        currentPattern: top1.pattern,
-                        currentDirection: Math.random() > 0.5 ? 'COMPRADO' : 'VENDIDO',
-                        trades: updatedTrades,
-                        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-                    }, { merge: true });
-                }
-            }
+        if (!top1) {
+            console.log("Nenhum sinal M5 disponível para o simulador.");
+            return;
         }
+        // Pega o último trade registrado pelo catalogador
+        const lastEntry = top1.rawHistory[top1.rawHistory.length - 1];
+        const lastResult = typeof lastEntry === 'number' ? lastEntry : ((_a = lastEntry === null || lastEntry === void 0 ? void 0 : lastEntry.result) !== null && _a !== void 0 ? _a : -1);
+        const lastTime = typeof lastEntry === 'number' ? 0 : ((_b = lastEntry === null || lastEntry === void 0 ? void 0 : lastEntry.time) !== null && _b !== void 0 ? _b : 0);
+        const simRef = db.collection("stats").doc("global_simulator");
+        const simSnap = await simRef.get();
+        const simData = simSnap.exists ? simSnap.data() : { bankroll: 5000, lastTradeId: '', trades: [] };
+        // ID único e imutável para este trade: combina docId + tempo da vela
+        // Se não há timestamp no trade, usamos o comprimento do array como fallback único
+        const currentTradeId = `${top1.id}_${lastTime > 0 ? lastTime : `len${top1.rawHistory.length}`}`;
+        // CORREÇÃO BUG 2: Não fazemos early return — sempre verificamos se há trade novo
+        if (simData.lastTradeId === currentTradeId) {
+            // Nenhum trade novo desde a última execução, atualiza apenas par/padrão ativos
+            await simRef.set({
+                currentPair: top1.pair,
+                currentPattern: top1.pattern,
+                currentDirection: Math.random() > 0.5 ? 'CALL' : 'PUT',
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            console.log("Nenhum trade novo. Par/padrão atualizados.");
+            return;
+        }
+        // Novo trade detectado — calcular e registrar
+        const { profit, status } = calcProfit(lastResult);
+        const prevBankroll = (_c = simData.bankroll) !== null && _c !== void 0 ? _c : 5000;
+        const newBankroll = prevBankroll + profit;
+        const direction = Math.random() > 0.5 ? 'CALL' : 'PUT';
+        const newTrade = {
+            id: currentTradeId,
+            pair: top1.pair,
+            pattern: top1.pattern,
+            direction,
+            result: lastResult, // 0, 1, 2 ou -1
+            profit: parseFloat(profit.toFixed(2)),
+            status,
+            time: lastTime > 0 ? lastTime : Date.now()
+        };
+        const currentTrades = simData.trades || [];
+        const updatedTrades = [...currentTrades, newTrade].slice(-50); // mantém últimos 50
+        await simRef.set({
+            bankroll: parseFloat(newBankroll.toFixed(2)),
+            lastTradeId: currentTradeId,
+            lastPair: top1.id,
+            currentPair: top1.pair,
+            currentPattern: top1.pattern,
+            currentDirection: direction,
+            trades: updatedTrades,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        console.log(`Trade registrado: ${top1.pair} | ${status} | ${profit >= 0 ? '+' : ''}${profit.toFixed(2)} | Banca: $${newBankroll.toFixed(2)}`);
     }
     catch (error) {
         console.error("Erro no Simulador Global:", error);

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { collection, onSnapshot, query } from 'firebase/firestore';
 import { db } from './lib/firebase';
 import { SignalCard } from './components/SignalCard';
@@ -64,27 +64,37 @@ interface SignalData {
   pair: string;
   pattern: string;
   timeframe: number;
-  rawHistory: number[];
+  rawHistory: any[];      // TradeResult[] = {result: number, time: number}
   updatedAt: any;
 }
+
+/**
+ * Normaliza um valor de rawHistory para número.
+ * O backend salva objetos {result, time} — esta função extrai o number.
+ */
+const normalizeResult = (r: any): number => {
+  if (typeof r === 'number') return r;
+  if (r && typeof r === 'object' && 'result' in r) return r.result;
+  return -1;
+};
 
 function App() {
   const { loading: authLoading, timeRemaining } = useAuth();
   const [signals, setSignals] = useState<SignalData[]>([]);
   const [loadingData, setLoadingData] = useState(true);
-  
+
   // Filtros e UI
   const [lang, setLang] = useState<'pt' | 'en'>('pt');
   const [showWelcome, setShowWelcome] = useState(true);
   const [galeLimit, setGaleLimit] = useState<number>(2);
   const [selectedPair, setSelectedPair] = useState<string>('ALL');
   const [selectedTimeframe, setSelectedTimeframe] = useState<number>(5);
-  
+
   const t = translations[lang];
 
   useEffect(() => {
     const q = query(collection(db, "signals"));
-    
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const fetchedSignals: SignalData[] = [];
       snapshot.forEach((doc) => {
@@ -103,6 +113,31 @@ function App() {
     return () => unsubscribe();
   }, []);
 
+  /**
+   * Calcula o score de ordenação para um sinal.
+   * CORRIGIDO: normaliza rawHistory antes de comparar.
+   */
+  const getScoreForSorting = useCallback((rawHistory: any[], limit: number): { rate: number; trendScore: number } => {
+    if (!rawHistory || rawHistory.length === 0) return { rate: 0, trendScore: -999 };
+    const recent = rawHistory.slice(-100);
+    let wins = 0;
+    let trendScore = 0;
+
+    recent.forEach((r, idx) => {
+      const val = normalizeResult(r);
+      const isWin = val >= 0 && val <= limit; // ganhou dentro do limite de gale configurado
+      if (isWin) wins++;
+
+      // Peso pesado para a tendência recente (últimos 10 resultados)
+      if (idx >= recent.length - 10) {
+        trendScore += isWin ? 1 : -2;
+      }
+    });
+
+    const rate = recent.length > 0 ? (wins / recent.length) * 100 : 0;
+    return { rate, trendScore };
+  }, []);
+
   // Filtra e ordena os sinais (O Motor de Recomendação)
   const displaySignals = useMemo(() => {
     let filtered = signals;
@@ -113,40 +148,22 @@ function App() {
     // Filtra por Timeframe
     filtered = filtered.filter(s => s.timeframe === selectedTimeframe);
 
-    const getScoreForSorting = (rawHistory: number[]) => {
-      if (!rawHistory) return { rate: 0, trendScore: -999 };
-      const recent = rawHistory.slice(-100);
-      let wins = 0;
-      let trendScore = 0;
-      recent.forEach((r, idx) => {
-        const isHit = r === -1 || r > galeLimit;
-        if (!isHit) wins++;
-        
-        // Peso pesado para a tendência recente (últimos 10 resultados)
-        if (idx >= recent.length - 10) {
-           trendScore += isHit ? -2 : 1;
-        }
-      });
-      const rate = recent.length > 0 ? (wins / recent.length) * 100 : 0;
-      return { rate, trendScore };
-    };
-
     return filtered.sort((a, b) => {
-      const scoreA = getScoreForSorting(a.rawHistory);
-      const scoreB = getScoreForSorting(b.rawHistory);
-      
+      const scoreA = getScoreForSorting(a.rawHistory, galeLimit);
+      const scoreB = getScoreForSorting(b.rawHistory, galeLimit);
+
       // Ordenação Primária: Tendência Recente (TrendScore)
       if (scoreA.trendScore !== scoreB.trendScore) {
-        return scoreB.trendScore - scoreA.trendScore; 
+        return scoreB.trendScore - scoreA.trendScore;
       }
       // Ordenação Secundária: Assertividade Global
-      return scoreB.rate - scoreA.rate; 
+      return scoreB.rate - scoreA.rate;
     });
-  }, [signals, galeLimit, selectedPair, selectedTimeframe]);
+  }, [signals, galeLimit, selectedPair, selectedTimeframe, getScoreForSorting]);
 
   const uniquePairs = useMemo(() => {
     const pairs = new Set(signals.map(s => s.pair));
-    return Array.from(pairs);
+    return Array.from(pairs).sort();
   }, [signals]);
 
   const formatTime = (seconds: number | null) => {
@@ -174,7 +191,7 @@ function App() {
             <div className="bg-blue-500/10 border border-blue-500/20 p-4 rounded-2xl mb-8">
               <p className="text-blue-400 font-semibold">{t.modalOffer}</p>
             </div>
-            <button 
+            <button
               onClick={() => setShowWelcome(false)}
               className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-emerald-500/20 active:scale-95"
             >
@@ -210,7 +227,7 @@ function App() {
         </h1>
         <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
           {/* Seletor de Idioma */}
-          <button 
+          <button
             onClick={() => setLang(lang === 'pt' ? 'en' : 'pt')}
             className="bg-slate-800 hover:bg-slate-700 p-2 rounded-lg border border-slate-700 transition-colors"
             title="Switch Language"
@@ -237,7 +254,7 @@ function App() {
           <label className="flex items-center gap-2 text-sm font-semibold text-slate-400 mb-2">
             <Search size={16} /> {t.pair}
           </label>
-          <select 
+          <select
             className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none focus:border-blue-500 transition-colors"
             value={selectedPair}
             onChange={(e) => setSelectedPair(e.target.value)}
@@ -248,12 +265,12 @@ function App() {
             ))}
           </select>
         </div>
-        
+
         <div className="flex-1 min-w-[200px]">
           <label className="flex items-center gap-2 text-sm font-semibold text-slate-400 mb-2">
             <Clock size={16} /> {t.timeframe}
           </label>
-          <select 
+          <select
             className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none focus:border-blue-500 transition-colors"
             value={selectedTimeframe}
             onChange={(e) => setSelectedTimeframe(Number(e.target.value))}
@@ -267,7 +284,7 @@ function App() {
           <label className="flex items-center gap-2 text-sm font-semibold text-slate-400 mb-2">
             <Filter size={16} /> {t.martingale}
           </label>
-          <select 
+          <select
             className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none focus:border-blue-500 transition-colors"
             value={galeLimit}
             onChange={(e) => setGaleLimit(Number(e.target.value))}
@@ -280,14 +297,15 @@ function App() {
         </div>
       </section>
 
-      {/* Simulador de Trades - Fixo no Melhor de M5 seguindo a ordenação oficial */}
+      {/* Simulador de Trades - Fixo no Melhor de M5 */}
       {!loadingData && signals.length > 0 && (
-        <TradeSimulator 
-          topSignal={displaySignals.find(s => s.timeframe === 5) || null} 
+        <TradeSimulator
+          topSignal={displaySignals.find(s => s.timeframe === 5) || null}
+          galeLimit={galeLimit}
         />
       )}
 
-      {/* Grid */}
+      {/* Grid de Sinais */}
       <main className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {loadingData ? (
           <div className="col-span-full flex flex-col justify-center items-center py-20 text-slate-400">
@@ -308,6 +326,7 @@ function App() {
               rawHistory={signal.rawHistory || []}
               galeLimit={galeLimit}
               timeframe={selectedTimeframe}
+              updatedAt={signal.updatedAt}
             />
           ))
         )}

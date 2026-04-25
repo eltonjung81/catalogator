@@ -1,141 +1,247 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Wallet, TrendingUp, Zap } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Wallet, TrendingUp, TrendingDown, Zap, Clock, ArrowUp, ArrowDown } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
+
+interface Trade {
+  id: string;
+  pair: string;
+  pattern: string;
+  direction: 'CALL' | 'PUT';
+  result: number; // 0, 1, 2 ou -1
+  profit: number;
+  status: string;
+  time: number; // timestamp ms
+}
+
+interface SimData {
+  bankroll: number;
+  trades: Trade[];
+  currentPair?: string;
+  currentPattern?: string;
+  currentDirection?: string;
+  lastTradeId?: string;
+  updatedAt?: any;
+}
 
 interface TradeSimulatorProps {
   topSignal: {
     pair: string;
     pattern: string;
-    rawHistory: number[];
+    rawHistory: any[];
   } | null;
+  galeLimit: number;
 }
 
+// Retorna segundos até o próximo múltiplo de 5 minutos
+const getSecondsToNextCycle = (): number => {
+  const now = new Date();
+  const totalSeconds = now.getMinutes() * 60 + now.getSeconds();
+  const cycleSeconds = 5 * 60;
+  return cycleSeconds - (totalSeconds % cycleSeconds);
+};
+
+// Retorna a fase atual dentro do ciclo de 5 minutos
+const getCyclePhase = (): { phase: 'ENTRY' | 'M_FIXA' | 'GALE1' | 'GALE2' | 'IDLE'; cycleMin: number } => {
+  const now = new Date();
+  const cycleMin = now.getMinutes() % 5;
+  if (cycleMin === 4) return { phase: 'ENTRY', cycleMin };
+  if (cycleMin === 0) return { phase: 'M_FIXA', cycleMin };
+  if (cycleMin === 1) return { phase: 'GALE1', cycleMin };
+  if (cycleMin === 2) return { phase: 'GALE2', cycleMin };
+  return { phase: 'IDLE', cycleMin };
+};
+
+// Calcula o valor total investido até o momento (deducted do saldo)
+const getActiveBet = (phase: string): number => {
+  if (phase === 'M_FIXA') return 1;
+  if (phase === 'GALE1') return 3;  // 1 + 2
+  if (phase === 'GALE2') return 7;  // 1 + 2 + 4
+  return 0;
+};
+
 export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => {
-  const [liveStatus, setLiveStatus] = useState<{msg: string, color: string, isEntering: boolean}>({
-    msg: 'Monitorando mercado...',
-    color: 'text-blue-400',
-    isEntering: false
-  });
+  const [simData, setSimData] = useState<SimData>({ bankroll: 5000, trades: [] });
 
-  const [simData, setSimData] = useState<{
-    bankroll: number, 
-    trades: any[], 
-    currentPair?: string, 
-    currentPattern?: string, 
-    currentDirection?: string
-  }>({ bankroll: 5000, trades: [] });
+  // Tick interno — força re-render a cada segundo para atualizar countdown e fase
+  const [, setTick] = useState<number>(0);
+  const lastTradeIdRef = useRef<string | null>(null);
 
+  // Flash de resultado: null = sem flash, 'GAIN' | 'LOSS' = exibindo resultado
+  const [flashResult, setFlashResult] = useState<{ type: 'GAIN' | 'LOSS'; status: string; profit: number } | null>(null);
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ─── Relógio interno (atualiza a cada segundo) ───────────────────────────
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, "stats", "global_simulator"), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setSimData({
-          bankroll: data.bankroll || 5000,
-          trades: (data.trades || []).slice(-20).reverse(),
-          currentPair: data.currentPair,
-          currentPattern: data.currentPattern,
-          currentDirection: data.currentDirection
-        });
-      }
-    });
-    return () => unsub();
+    const timer = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(timer);
   }, []);
 
-  // Efeito de Ciclo de Operação em Tempo Real
+  // ─── Listener do Firestore para o simulador global ───────────────────────
   useEffect(() => {
-    const updateStatus = () => {
-      const now = new Date();
-      const min = now.getMinutes();
-      const cycleMin = min % 5;
+    const unsub = onSnapshot(doc(db, "stats", "global_simulator"), (docSnap) => {
+      if (!docSnap.exists()) return;
+      const data = docSnap.data();
 
-      const direction = simData.currentDirection || 'ANALISANDO';
+      // Ordena os trades do mais antigo para o mais novo (ascending por time)
+      const sortedTrades: Trade[] = [...(data.trades || [])].sort((a, b) => a.time - b.time);
 
-      if (cycleMin === 4) {
-        setLiveStatus({
-          msg: `Padrão Detectado! Entrando ${direction} em ${simData.currentPair || topSignal?.pair} (${simData.currentPattern || topSignal?.pattern}) na próxima vela...`,
-          color: 'text-amber-400 animate-pulse',
-          isEntering: true
-        });
-      } else if (cycleMin === 0 || cycleMin === 1 || cycleMin === 2) {
-        const stage = cycleMin === 0 ? 'Mão Fixa' : `Gale ${cycleMin}`;
-        setLiveStatus({
-          msg: `Operação em Andamento (${stage}): ${simData.currentPair || topSignal?.pair} - ${simData.currentPattern || topSignal?.pattern} (${direction})`,
-          color: 'text-emerald-400',
-          isEntering: false
-        });
-      } else {
-        setLiveStatus({
-          msg: `Monitorando ${topSignal?.pair} (${topSignal?.pattern})... Aguardando sinal.`,
-          color: 'text-blue-400',
-          isEntering: false
-        });
+      setSimData({
+        bankroll: data.bankroll ?? 5000,
+        trades: sortedTrades,
+        currentPair: data.currentPair,
+        currentPattern: data.currentPattern,
+        currentDirection: data.currentDirection,
+        lastTradeId: data.lastTradeId,
+        updatedAt: data.updatedAt
+      });
+
+      // ─── Detecção de novo trade → flash GAIN/LOSS ───────────────────
+      const newLastTradeId = data.lastTradeId as string | undefined;
+      if (
+        newLastTradeId &&
+        lastTradeIdRef.current !== null &&        // não é a primeira carga
+        lastTradeIdRef.current !== newLastTradeId  // é um trade novo
+      ) {
+        const latestTrade = sortedTrades[sortedTrades.length - 1];
+        if (latestTrade) {
+          const isGain = latestTrade.profit > 0;
+          // Cancela flash anterior se ainda estiver ativo
+          if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+
+          setFlashResult({
+            type: isGain ? 'GAIN' : 'LOSS',
+            status: latestTrade.status,
+            profit: latestTrade.profit
+          });
+
+          // Flash dura 3 segundos
+          flashTimerRef.current = setTimeout(() => setFlashResult(null), 3000);
+        }
       }
+
+      // Registra sempre (inclusive na primeira carga)
+      lastTradeIdRef.current = newLastTradeId ?? null;
+    });
+
+    return () => {
+      unsub();
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
     };
+  }, []);
 
-    const timer = setInterval(updateStatus, 1000);
-    updateStatus();
-    return () => clearInterval(timer);
-  }, [topSignal]);
+  // ─── Valores calculados a partir do relógio interno ─────────────────────
+  const { phase } = getCyclePhase();
+  const secondsToNext = getSecondsToNextCycle();
+  const activeBet = getActiveBet(phase);
 
-  const [flashResult, setFlashResult] = useState<{status: string, color: string} | null>(null);
-  const lastTradeIdRef = React.useRef<string | null>(null);
-
-  // Detecta conclusão de trade para o Flash de 1 segundo
-  useEffect(() => {
-    if (simData.trades.length > 0) {
-      const latestTrade = simData.trades[0];
-      if (lastTradeIdRef.current && lastTradeIdRef.current !== latestTrade.id) {
-        // Um novo trade acabou de ser concluído!
-        setFlashResult({
-          status: latestTrade.status,
-          color: latestTrade.profit > 0 ? 'text-emerald-400' : 'text-red-400'
-        });
-        
-        // Remove o flash após 1 segundo
-        setTimeout(() => setFlashResult(null), 1000);
-      }
-      lastTradeIdRef.current = latestTrade.id;
-    }
-  }, [simData.trades]);
-
+  // Saldo "ao vivo" — desconta a aposta ativa para simular deducted em aberto
+  const displayedBankroll = simData.bankroll - activeBet;
   const profit = simData.bankroll - 5000;
 
-  // Calcula o valor da aposta atual para descontar "ao vivo"
-  const currentBetValue = useMemo(() => {
-    const now = new Date();
-    const cycleMin = now.getMinutes() % 5;
-    if (cycleMin === 0) return 1; // Mão Fixa
-    if (cycleMin === 1) return 3; // Mão Fixa (1) + Gale 1 (2)
-    if (cycleMin === 2) return 7; // 1 + 2 + Gale 2 (4)
-    return 0;
-  }, [new Date().getMinutes()]);
+  // Trades para exibição (mais recentes primeiro, últimos 20)
+  const displayTrades = [...simData.trades].reverse().slice(0, 20);
 
-  const displayedBankroll = simData.bankroll - currentBetValue;
+  // ─── Mensagem de status do ciclo ────────────────────────────────────────
+  const pair = simData.currentPair || topSignal?.pair || '---';
+  const pattern = simData.currentPattern || topSignal?.pattern || '---';
+  const direction = simData.currentDirection || '---';
+
+  const statusConfig = (() => {
+    if (flashResult) {
+      const isGain = flashResult.type === 'GAIN';
+      return {
+        msg: `${flashResult.status}! ${isGain ? '+' : ''}$${flashResult.profit.toFixed(2)}`,
+        subMsg: 'Operação encerrada e computada na banca',
+        bgClass: isGain ? 'bg-emerald-500/20 border-emerald-500/60' : 'bg-red-500/20 border-red-500/60',
+        dotClass: isGain ? 'bg-emerald-400' : 'bg-red-400',
+        textClass: isGain ? 'text-emerald-300 text-xl font-black' : 'text-red-300 text-xl font-black',
+        icon: isGain ? <TrendingUp size={36} className="text-emerald-400" /> : <TrendingDown size={36} className="text-red-400" />
+      };
+    }
+    if (phase === 'ENTRY') {
+      return {
+        msg: `Padrão Detectado! Entrando ${direction} em ${pair} (${pattern})`,
+        subMsg: 'Aguardando abertura da próxima vela...',
+        bgClass: 'bg-amber-500/10 border-amber-500/30',
+        dotClass: 'bg-amber-500 animate-ping',
+        textClass: 'text-amber-400 animate-pulse font-bold',
+        icon: <TrendingUp size={32} className="text-amber-400/50" />
+      };
+    }
+    if (phase === 'M_FIXA' || phase === 'GALE1' || phase === 'GALE2') {
+      const stage = phase === 'M_FIXA' ? 'Mão Fixa' : phase === 'GALE1' ? 'Gale 1' : 'Gale 2';
+      return {
+        msg: `Operação em Andamento (${stage}): ${pair} → ${direction}`,
+        subMsg: `${pattern} | Aguardando resultado da vela...`,
+        bgClass: 'bg-blue-500/10 border-blue-500/30',
+        dotClass: 'bg-blue-500',
+        textClass: 'text-blue-300 font-semibold',
+        icon: <TrendingUp size={32} className="text-blue-400/30" />
+      };
+    }
+    return {
+      msg: `Monitorando ${pair} (${pattern})`,
+      subMsg: `Próxima entrada em ${Math.floor(secondsToNext / 60)}:${String(secondsToNext % 60).padStart(2, '0')}`,
+      bgClass: 'bg-slate-700/30 border-slate-600/30',
+      dotClass: 'bg-slate-500',
+      textClass: 'text-slate-400',
+      icon: <Clock size={32} className="text-slate-600" />
+    };
+  })();
+
+  // Countdown formatado
+  const countdownFormatted = `${Math.floor(secondsToNext / 60).toString().padStart(2, '0')}:${String(secondsToNext % 60).padStart(2, '0')}`;
 
   if (!topSignal) return null;
 
   return (
-    <div className="bg-slate-800/50 border border-blue-500/30 rounded-2xl p-6 mb-8 backdrop-blur-sm animate-in fade-in slide-in-from-top duration-500">
-      <div className="flex flex-col lg:flex-row gap-8">
-        
-        {/* Painel de Banca */}
+    <div className={`relative rounded-2xl p-6 mb-8 overflow-hidden transition-all duration-500 ${
+      flashResult
+        ? flashResult.type === 'GAIN'
+          ? 'bg-emerald-950/60 border-2 border-emerald-500/80 shadow-xl shadow-emerald-500/20'
+          : 'bg-red-950/60 border-2 border-red-500/80 shadow-xl shadow-red-500/20'
+        : 'bg-slate-800/50 border border-blue-500/30 backdrop-blur-sm'
+    } animate-in fade-in slide-in-from-top duration-500`}>
+
+      {/* Overlay animado de GAIN / LOSS */}
+      {flashResult && (
+        <div className={`absolute inset-0 pointer-events-none animate-pulse rounded-2xl ${
+          flashResult.type === 'GAIN' ? 'bg-emerald-500/5' : 'bg-red-500/5'
+        }`} />
+      )}
+
+      <div className="flex flex-col lg:flex-row gap-8 relative z-10">
+
+        {/* ── Painel de Banca ───────────────────────────────────────── */}
         <div className="flex-1">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2 text-blue-400">
               <Wallet size={20} />
-              <h2 className="font-bold uppercase tracking-wider text-sm">Monitor de Alta Performance (Fixo M5)</h2>
+              <h2 className="font-bold uppercase tracking-wider text-sm">Monitor de Alta Performance (M5)</h2>
             </div>
-            <div className="bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-full flex items-center gap-2">
-              <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
-              <span className="text-emerald-400 text-[10px] font-bold uppercase">Robô Ativo 24h na Nuvem</span>
+            <div className="flex items-center gap-3">
+              {/* Countdown até próxima entrada */}
+              <div className="bg-slate-900/60 border border-slate-700 px-3 py-1 rounded-full flex items-center gap-1.5">
+                <Clock size={12} className="text-slate-400" />
+                <span className="text-slate-300 text-[11px] font-mono font-bold">{countdownFormatted}</span>
+              </div>
+              <div className="bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-full flex items-center gap-2">
+                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
+                <span className="text-emerald-400 text-[10px] font-bold uppercase">Robô Ativo 24h</span>
+              </div>
             </div>
           </div>
-          
+
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-700">
               <p className="text-slate-500 text-xs mb-1">Banca Atual (Demo)</p>
-              <p className="text-2xl font-bold text-white">$ {displayedBankroll.toFixed(2)}</p>
+              <p className={`text-2xl font-bold transition-colors duration-300 ${flashResult ? (flashResult.type === 'GAIN' ? 'text-emerald-300' : 'text-red-300') : 'text-white'}`}>
+                $ {displayedBankroll.toFixed(2)}
+              </p>
+              {activeBet > 0 && (
+                <p className="text-amber-500/70 text-[10px] mt-1 font-mono">-${activeBet.toFixed(2)} em aberto</p>
+              )}
             </div>
             <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-700">
               <p className="text-slate-500 text-xs mb-1">Lucro Acumulado</p>
@@ -145,51 +251,100 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
             </div>
           </div>
 
-          <div className={`mt-6 p-4 rounded-xl flex items-center justify-between border transition-all duration-300 ${flashResult ? 'bg-white/10 border-white/40 scale-[1.02]' : liveStatus.isEntering ? 'bg-amber-500/10 border-amber-500/30' : 'bg-blue-500/10 border-blue-500/20'}`}>
+          {/* Painel de Status / Flash de Resultado */}
+          <div className={`mt-4 p-4 rounded-xl flex items-center justify-between border transition-all duration-300 ${statusConfig.bgClass}`}>
             <div className="flex items-center gap-3">
-              <div className="relative">
-                <div className={`w-3 h-3 rounded-full animate-ping ${flashResult ? 'bg-white' : liveStatus.isEntering ? 'bg-amber-500' : 'bg-blue-500'}`}></div>
-                <div className={`absolute inset-0 w-3 h-3 rounded-full ${flashResult ? 'bg-white' : liveStatus.isEntering ? 'bg-amber-500' : 'bg-blue-500'}`}></div>
+              <div className="relative flex-shrink-0">
+                <div className={`w-3 h-3 rounded-full ${statusConfig.dotClass}`}></div>
               </div>
               <div>
-                <p className={`font-bold text-sm ${flashResult ? flashResult.color + ' text-xl animate-bounce' : liveStatus.color}`}>
-                  {flashResult ? `RESULTADO: ${flashResult.status}!` : liveStatus.msg}
+                <p className={`font-bold text-sm leading-tight ${statusConfig.textClass}`}>
+                  {statusConfig.msg}
                 </p>
-                <p className="text-slate-500 text-xs">
-                  {flashResult ? 'Operação encerrada e computada' : 'Sincronizado com o ciclo de 5 minutos da Binance'}
-                </p>
+                <p className="text-slate-500 text-xs mt-0.5">{statusConfig.subMsg}</p>
               </div>
             </div>
-            <TrendingUp className={flashResult ? 'text-white' : liveStatus.isEntering ? 'text-amber-400/30' : 'text-blue-400/30'} size={32} />
+            <div className="flex-shrink-0 ml-2">
+              {statusConfig.icon}
+            </div>
+          </div>
+
+          {/* Barra de progresso do ciclo */}
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-[10px] text-slate-600 uppercase font-bold tracking-wider">Ciclo M5</span>
+            <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-1000 ${
+                  phase === 'ENTRY' ? 'bg-amber-500' :
+                  phase === 'IDLE' ? 'bg-slate-600' : 'bg-blue-500'
+                }`}
+                style={{ width: `${((300 - secondsToNext) / 300) * 100}%` }}
+              />
+            </div>
+            <span className="text-[10px] text-slate-500 font-mono">{countdownFormatted}</span>
           </div>
         </div>
 
-        {/* Histórico de Trades Simulado */}
+        {/* ── Histórico de Trades ───────────────────────────────────── */}
         <div className="lg:w-96">
-          <div className="flex items-center gap-2 text-slate-400 mb-4">
-            <Zap size={18} />
-            <h3 className="font-semibold text-xs uppercase">Histórico de Operações</h3>
+          <div className="flex items-center gap-2 text-slate-400 mb-3">
+            <Zap size={16} />
+            <h3 className="font-semibold text-xs uppercase tracking-wider">Histórico de Operações</h3>
+            <span className="ml-auto text-[10px] text-slate-600">{simData.trades.length} ops</span>
           </div>
-          <div className="space-y-2 max-h-[160px] overflow-y-auto pr-2 custom-scrollbar">
-            {simData.trades.map((trade, i) => (
-              <div key={i} className="flex items-center justify-between bg-slate-900/50 p-2 rounded-lg border border-slate-800 text-[10px] hover:border-slate-600 transition-colors">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-white font-bold min-w-[65px]">{trade.pair}</span>
-                  <span className="text-slate-700">|</span>
-                  <span className={`font-bold min-w-[50px] ${trade.profit > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {trade.profit > 0 ? '+' : ''}{trade.profit.toFixed(2)}
-                  </span>
-                  <span className="text-slate-700">|</span>
-                  <span className="text-slate-500 italic">
-                    {new Date(trade.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-                <span className={`font-black px-2 py-0.5 rounded text-[9px] ${trade.profit > 0 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
-                  {trade.status}
-                </span>
-              </div>
-            ))}
-          </div>
+
+          {simData.trades.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-28 text-slate-600 text-sm border border-dashed border-slate-700 rounded-xl">
+              <Zap size={20} className="mb-2 opacity-40" />
+              Aguardando primeiras operações...
+            </div>
+          ) : (
+            <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1 custom-scrollbar">
+              {displayTrades.map((trade) => {
+                const isGain = trade.profit > 0;
+                const tradeDirection = trade.direction || (Math.random() > 0.5 ? 'CALL' : 'PUT');
+                const level =
+                  trade.result === 0 ? 'M.Fixa' :
+                  trade.result === 1 ? 'G1' :
+                  trade.result === 2 ? 'G2' : 'G2';
+
+                return (
+                  <div
+                    key={trade.id}
+                    className={`flex items-center justify-between p-2.5 rounded-lg border text-[10px] transition-colors ${
+                      isGain
+                        ? 'bg-emerald-950/30 border-emerald-800/30 hover:border-emerald-700/50'
+                        : 'bg-red-950/30 border-red-800/30 hover:border-red-700/50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      {/* Seta de direção */}
+                      {tradeDirection === 'CALL'
+                        ? <ArrowUp size={12} className="text-emerald-400 flex-shrink-0" />
+                        : <ArrowDown size={12} className="text-red-400 flex-shrink-0" />
+                      }
+                      <span className="text-white font-bold truncate">{trade.pair}</span>
+                      <span className="text-slate-600">•</span>
+                      <span className="text-slate-400">{level}</span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                      <span className={`font-black ${isGain ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {isGain ? '+' : ''}${trade.profit.toFixed(2)}
+                      </span>
+                      <span className={`px-1.5 py-0.5 rounded font-black text-[9px] ${
+                        isGain ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+                      }`}>
+                        {isGain ? 'GAIN' : 'LOSS'}
+                      </span>
+                      <span className="text-slate-600 font-mono text-[9px]">
+                        {new Date(trade.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
       </div>

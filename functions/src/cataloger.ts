@@ -126,73 +126,69 @@ export const analyzeM1Trend = (candles: Candle[]): 'GREEN' | 'RED' | null => {
 // -1 = HIT (Loss total)
 // null = Não operou
 
+export interface TradeResult {
+  result: number;
+  time: number;
+}
+
 export const runCataloger = (
   blocks: Candle[][], 
   patternAnalyzer: (prevBlock: Candle[]) => 'GREEN' | 'RED' | null,
-  entryCandleIndex: number = 0 // 0 = 1ª vela (MHI1), 1 = 2ª vela (MHI2), etc.
-): (number | null)[] => {
+  entryCandleIndex: number = 0
+): TradeResult[] => {
   
-  const history: (number | null)[] = [];
+  const history: TradeResult[] = [];
 
-  // Começa do índice 1, pois precisamos do bloco 0 como "bloco anterior" para analisar
   for (let i = 1; i < blocks.length; i++) {
     const prevBlock = blocks[i - 1];
     const currentBlock = blocks[i];
 
-    // Removemos a trava de 5 velas para suportar M1
     if (prevBlock.length < 1 || currentBlock.length < 1) {
-      history.push(null);
       continue;
     }
 
     const prediction = patternAnalyzer(prevBlock);
     
     if (!prediction) {
-      history.push(null);
       continue;
     }
 
     let result: number | null = -1;
     let isDetermined = false;
 
-    // Avalia até Gale 2 (tentativas 0, 1 e 2)
     for (let attempt = 0; attempt <= 2; attempt++) {
       let tradeCandle: Candle | undefined;
 
-      // No M5 (bloco > 1), a tentativa pode estar dentro do bloco
       if (entryCandleIndex + attempt < currentBlock.length) {
         tradeCandle = currentBlock[entryCandleIndex + attempt];
       } else {
-        // No M1 (bloco = 1), as tentativas (Gales) estão nos blocos seguintes
         const nextBlockIdx = i + (attempt - (currentBlock.length - 1 - entryCandleIndex));
         if (nextBlockIdx < blocks.length) {
           tradeCandle = blocks[nextBlockIdx][0];
         }
       }
       
-      // Se a vela da tentativa ainda não fechou (não existe no array),
-      // a operação ainda está em andamento. Não podemos dizer se é HIT ou GAIN.
       if (!tradeCandle) {
         break; 
       }
 
-      // Se deu Win
       if (tradeCandle.color === prediction) {
         result = attempt;
         isDetermined = true;
         break;
       }
 
-      // Se chegou no limite de Gales (2) e não deu Win, é HIT definitivo
       if (attempt === 2) {
         result = -1;
         isDetermined = true;
       }
     }
 
-    // Só adiciona ao histórico se tiver finalizado (Win ou Loss final)
     if (isDetermined) {
-      history.push(result);
+      history.push({
+        result: result as number,
+        time: currentBlock[0].openTime
+      });
     }
   }
 
