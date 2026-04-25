@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { collection, onSnapshot, query } from 'firebase/firestore';
 import { PayPalScriptProvider } from '@paypal/react-paypal-js';
-import { db } from './lib/firebase';
+import { db, trackEvent } from './lib/firebase';
 import { SignalCard } from './components/SignalCard';
 import { TradeSimulator } from './components/TradeSimulator';
 import { PayPalPayment } from './components/PayPalPayment';
@@ -92,7 +92,11 @@ function App() {
   const [signals, setSignals] = useState<SignalData[]>([]);
   const [loadingData, setLoadingData] = useState(true);
 
-  const [lang, setLang] = useState<'pt' | 'en'>('pt');
+  const [lang, setLang] = useState<'pt' | 'en'>(() => {
+    // Detecta o idioma do navegador
+    const browserLang = navigator.language.toLowerCase();
+    return browserLang.startsWith('pt') ? 'pt' : 'en';
+  });
   const [showWelcome, setShowWelcome] = useState(true);
   const [galeLimit, setGaleLimit] = useState<number>(2);
   const [selectedPair, setSelectedPair] = useState<string>('ALL');
@@ -100,6 +104,10 @@ function App() {
   const [paymentMethod, setPaymentMethod] = useState<'mercadopago' | 'paypal'>('mercadopago');
 
   const t = translations[lang];
+
+  useEffect(() => {
+    trackEvent('page_view', { language: lang });
+  }, [lang]);
 
   useEffect(() => {
     const q = query(collection(db, "signals"));
@@ -193,7 +201,10 @@ function App() {
                 <p className="text-blue-400 font-semibold">{t.modalOffer}</p>
               </div>
               <button
-                onClick={() => setShowWelcome(false)}
+                onClick={() => {
+                  setShowWelcome(false);
+                  trackEvent('start_trial_click');
+                }}
                 className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-4 rounded-2xl transition-all shadow-lg shadow-emerald-500/20 active:scale-95"
               >
                 {t.startTrial}
@@ -215,7 +226,10 @@ function App() {
                   <h2 className="text-2xl font-bold text-white mb-4">{t.lockTitle}</h2>
                   <p className="text-slate-300 mb-8">{t.lockBody}</p>
                   <button
-                    onClick={login}
+                    onClick={() => {
+                      login();
+                      trackEvent('google_login_click');
+                    }}
                     className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-100 text-slate-800 font-bold py-4 px-6 rounded-2xl transition-all shadow-lg active:scale-95"
                   >
                     <svg className="w-6 h-6" viewBox="0 0 24 24">
@@ -236,13 +250,19 @@ function App() {
                   {/* Seletor de Pagamento */}
                   <div className="flex bg-slate-900/50 p-1 rounded-xl mb-6 border border-slate-700">
                     <button
-                      onClick={() => setPaymentMethod('mercadopago')}
+                      onClick={() => {
+                        setPaymentMethod('mercadopago');
+                        trackEvent('select_payment', { method: 'mercadopago' });
+                      }}
                       className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${paymentMethod === 'mercadopago' ? 'bg-blue-500 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
                     >
                       Mercado Pago (PIX)
                     </button>
                     <button
-                      onClick={() => setPaymentMethod('paypal')}
+                      onClick={() => {
+                        setPaymentMethod('paypal');
+                        trackEvent('select_payment', { method: 'paypal' });
+                      }}
                       className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${paymentMethod === 'paypal' ? 'bg-blue-500 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}
                     >
                       PayPal
@@ -280,11 +300,19 @@ function App() {
           </h1>
           <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
             <button
-              onClick={() => setLang(lang === 'pt' ? 'en' : 'pt')}
-              className="bg-slate-800 hover:bg-slate-700 p-2 rounded-lg border border-slate-700 transition-colors"
+              onClick={() => {
+                const newLang = lang === 'pt' ? 'en' : 'pt';
+                setLang(newLang);
+                trackEvent('change_language', { language: newLang });
+              }}
+              className="bg-slate-800 hover:bg-slate-700 p-2 rounded-lg border border-slate-700 transition-colors flex items-center gap-2"
               title="Switch Language"
             >
-              <Globe size={18} className="text-slate-300" />
+              {lang === 'pt' ? (
+                <span className="text-xl" title="Português">🇵🇹</span>
+              ) : (
+                <span className="text-xl" title="English">🇺🇸</span>
+              )}
             </button>
 
             <div className="bg-slate-800/80 px-4 py-2 rounded-lg border border-slate-700 flex items-center gap-2">

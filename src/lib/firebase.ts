@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, signInAnonymously } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getAnalytics, logEvent } from 'firebase/analytics';
 
 // TODO: Substituir pelas chaves reais do projeto no Firebase Console
 // Crie um arquivo .env.local na raiz do projeto e adicione estas variáveis
@@ -16,6 +17,13 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;
+
+export const trackEvent = (eventName: string, params?: object) => {
+  if (analytics) {
+    logEvent(analytics, eventName, params);
+  }
+};
 
 export const googleProvider = new GoogleAuthProvider();
 
