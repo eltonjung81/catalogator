@@ -28,15 +28,55 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
     return () => unsub();
   }, []);
 
-  const profit = simData.bankroll - 5000;
+  const [liveStatus, setLiveStatus] = useState<{msg: string, color: string, isEntering: boolean}>({
+    msg: 'Monitorando mercado...',
+    color: 'text-blue-400',
+    isEntering: false
+  });
 
-  // Efeito visual de "Analisando..."
+  // Efeito de Ciclo de Operação em Tempo Real
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentStep(prev => (prev + 1) % 3);
-    }, 3000);
+    const updateStatus = () => {
+      const now = new Date();
+      const min = now.getMinutes();
+      const sec = now.getSeconds();
+      const cycleMin = min % 5;
+
+      if (cycleMin === 4) {
+        // Padrão Formando (Último minuto do bloco)
+        const direction = Math.random() > 0.5 ? 'COMPRADO' : 'VENDIDO'; // Simulação de direção baseada no padrão
+        setLiveStatus({
+          msg: `Padrão Detectado! Entrando ${direction} na próxima vela...`,
+          color: 'text-amber-400 animate-pulse',
+          isEntering: true
+        });
+      } else if (cycleMin === 0) {
+        setLiveStatus({
+          msg: 'Operação em Andamento (Mão Fixa)...',
+          color: 'text-emerald-400',
+          isEntering: false
+        });
+      } else if (cycleMin === 1) {
+        setLiveStatus({
+          msg: 'Operação em Andamento (Gale 1)...',
+          color: 'text-emerald-500',
+          isEntering: false
+        });
+      } else {
+        setLiveStatus({
+          msg: `Aguardando formação de padrão em ${topSignal?.pair}...`,
+          color: 'text-blue-400',
+          isEntering: false
+        });
+      }
+    };
+
+    const timer = setInterval(updateStatus, 1000);
+    updateStatus();
     return () => clearInterval(timer);
-  }, []);
+  }, [topSignal]);
+
+  const profit = simData.bankroll - 5000;
 
   if (!topSignal) return null;
 
@@ -70,22 +110,20 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
             </div>
           </div>
 
-          <div className="mt-6 bg-blue-500/10 border border-blue-500/20 p-4 rounded-xl flex items-center justify-between">
+          <div className={`mt-6 p-4 rounded-xl flex items-center justify-between border transition-colors ${liveStatus.isEntering ? 'bg-amber-500/10 border-amber-500/30' : 'bg-blue-500/10 border-blue-500/20'}`}>
             <div className="flex items-center gap-3">
               <div className="relative">
-                <div className="w-3 h-3 bg-blue-500 rounded-full animate-ping"></div>
-                <div className="absolute inset-0 w-3 h-3 bg-blue-500 rounded-full"></div>
+                <div className={`w-3 h-3 rounded-full animate-ping ${liveStatus.isEntering ? 'bg-amber-500' : 'bg-blue-500'}`}></div>
+                <div className={`absolute inset-0 w-3 h-3 rounded-full ${liveStatus.isEntering ? 'bg-amber-500' : 'bg-blue-500'}`}></div>
               </div>
               <div>
-                <p className="text-blue-400 font-bold text-sm">
-                  {currentStep === 0 && `Monitorando ${topSignal.pair}...`}
-                  {currentStep === 1 && `Padrão ${topSignal.pattern} detectado!`}
-                  {currentStep === 2 && `Preparando entrada de $1.00...`}
+                <p className={`font-bold text-sm ${liveStatus.color}`}>
+                  {liveStatus.msg}
                 </p>
-                <p className="text-slate-500 text-xs">Aguardando fechamento da vela para confirmação</p>
+                <p className="text-slate-500 text-xs">Sincronizado com o ciclo de 5 minutos da Binance</p>
               </div>
             </div>
-            <TrendingUp className="text-blue-400/30" size={32} />
+            <TrendingUp className={liveStatus.isEntering ? 'text-amber-400/30' : 'text-blue-400/30'} size={32} />
           </div>
         </div>
 
