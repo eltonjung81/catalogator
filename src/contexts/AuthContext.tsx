@@ -64,11 +64,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     try {
       if (currentUser.isAnonymous) {
-        // Lógica para modo Anônimo (2 minutos)
-        const creationTime = new Date(currentUser.metadata.creationTime || Date.now()).getTime();
-        const trialDuration = 120; // 2 minutos em segundos
-        const trialElapsed = Math.floor((now - creationTime) / 1000);
-        remaining = trialElapsed < trialDuration ? trialDuration - trialElapsed : 0;
+        // Lógica para modo Anônimo (2 minutos) com trava de IP
+        const ipEligible = await checkIpEligibility(currentUser.uid);
+        
+        if (!ipEligible) {
+          remaining = 0; // Se o IP já usou, começa zerado
+        } else {
+          const creationTime = new Date(currentUser.metadata.creationTime || Date.now()).getTime();
+          const trialDuration = 120; // 2 minutos em segundos
+          const trialElapsed = Math.floor((now - creationTime) / 1000);
+          remaining = trialElapsed < trialDuration ? trialDuration - trialElapsed : 0;
+        }
       } else {
         // Lógica para modo Google (20 minutos)
         let userDoc = await getDoc(doc(db, 'users', currentUser.uid));
