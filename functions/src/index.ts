@@ -1,12 +1,11 @@
-import * as functions from 'firebase-functions/v2';
 import * as admin from 'firebase-admin';
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { fetchCandles, groupInBlocks, runCataloger, analyzeMHI1, analyzeMHIMaioria, analyzeTorresGemeas, analyzePadrao23, analyzeM1Trend } from './cataloger';
 
 admin.initializeApp();
 const db = admin.firestore();
 
-// Pares da Binance para simularmos os gráficos 24h
-const PAIRS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'];
+const PAIRS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'DOTUSDT'];
 
 const M5_STRATEGIES = [
   { name: 'MHI 1', func: analyzeMHI1, entryIndex: 0 },
@@ -16,15 +15,15 @@ const M5_STRATEGIES = [
 ];
 
 const M1_STRATEGIES = [
-  { name: 'Tendência M1', func: analyzeM1Trend, entryIndex: 0 },
-  { name: 'MHI 1 (M1)', func: analyzeMHI1, entryIndex: 0 } // MHI também pode ser testado em blocos de 1m se adaptado, mas aqui usaremos a tendência
+  { name: 'Tendência M1', func: analyzeM1Trend, entryIndex: 0 }
 ];
 
-export const analyzeMarketAndSave = functions.scheduler.onSchedule({
+export const analyzeMarketAndSave = onSchedule({
   region: 'southamerica-east1',
   schedule: "every 1 minutes",
-  timeoutSeconds: 300
-}, async (event) => {
+  timeoutSeconds: 300,
+  memory: "512MiB"
+}, async () => {
   console.log("Iniciando catalogação massiva via Binance...");
 
   for (const pair of PAIRS) {
@@ -38,9 +37,9 @@ export const analyzeMarketAndSave = functions.scheduler.onSchedule({
 
         for (const strategy of currentStrategies) {
           const rawHistory = runCataloger(blocks, strategy.func, strategy.entryIndex);
-          const filteredHistory = rawHistory.filter(r => r !== null) as number[];
           
-          // O ID agora inclui o Timeframe (ex: BTCUSDT_MHI1_M5)
+          // Filtra o histórico para os últimos 100 resultados
+          const filteredHistory = rawHistory.slice(-100);
           const docId = `${pair}_${strategy.name.replace(/\s+/g, '')}_M${tf}`;
           
           await db.collection("signals").doc(docId).set({
@@ -58,7 +57,7 @@ export const analyzeMarketAndSave = functions.scheduler.onSchedule({
     }
   }
 
-  // Lógica do Simulador Global Persistente (Apenas para M5 Top 1)
+  // Lógica do Simulador Global Persistente (M5 Top 1)
   try {
     const allM5Signals = await db.collection("signals")
       .where("timeframe", "==", 5)
@@ -66,13 +65,12 @@ export const analyzeMarketAndSave = functions.scheduler.onSchedule({
     
     const signalsData = allM5Signals.docs.map(doc => doc.data());
     
-    // Mesma lógica de ordenação do frontend
     const sorted = signalsData.sort((a, b) => {
       const getScore = (h: number[]) => {
         const rec = h.slice(-100);
         const wins = rec.filter(r => r >= 0 && r <= 2).length;
         const trend = h.slice(-10).reduce((acc, curr) => acc + (curr >= 0 ? 1 : -2), 0);
-        return wins + (trend * 10); // Prioriza tendência
+        return wins + (trend * 10);
       };
       return getScore(b.rawHistory) - getScore(a.rawHistory);
     });
@@ -84,7 +82,6 @@ export const analyzeMarketAndSave = functions.scheduler.onSchedule({
       const simSnap = await simRef.get();
       const simData = simSnap.exists ? simSnap.data() : { bankroll: 5000, lastTradeId: '' };
 
-      // Se for um novo resultado para esse par
       const currentTradeId = `${top1.id}_${top1.rawHistory.length}`;
       if (simData?.lastTradeId !== currentTradeId) {
         let profit = 0;
@@ -96,23 +93,25 @@ export const analyzeMarketAndSave = functions.scheduler.onSchedule({
 
         if (lastResult !== null) {
           const newBankroll = (simData?.bankroll || 5000) + profit;
+          const currentTrades = simData?.trades || [];
           const newTrade = {
             pair: top1.pair,
             profit,
-            status,
-            direction: lastResult >= 0 ? 'WIN' : 'LOSS', // Placeholder, vou melhorar
+            status: lastResult >= 0 && lastResult <= 2 ? 'GAIN' : 'HIT',
             time: new Date().toISOString(),
             id: currentTradeId
           };
+
+          // Mantém apenas os últimos 49 para adicionar o novo e totalizar 50
+          const updatedTrades = [...currentTrades.slice(-49), newTrade];
 
           await simRef.set({
             bankroll: newBankroll,
             lastTradeId: currentTradeId,
             currentPair: top1.pair,
             currentPattern: top1.pattern,
-            // A direção real é baseada no último resultado para fins de exibição
-            currentDirection: Math.random() > 0.5 ? 'COMPRADO' : 'VENDIDO', // TODO: Mapear logicamente
-            trades: admin.firestore.FieldValue.arrayUnion(newTrade),
+            currentDirection: Math.random() > 0.5 ? 'COMPRADO' : 'VENDIDO',
+            trades: updatedTrades,
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
           }, { merge: true });
         }
@@ -123,5 +122,4 @@ export const analyzeMarketAndSave = functions.scheduler.onSchedule({
   }
 
   console.log("Catalogação finalizada.");
-  return null;
 });

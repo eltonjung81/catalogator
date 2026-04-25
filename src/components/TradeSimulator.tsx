@@ -80,6 +80,18 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
 
   const profit = simData.bankroll - 5000;
 
+  // Calcula o valor da aposta atual para descontar "ao vivo"
+  const currentBetValue = useMemo(() => {
+    const now = new Date();
+    const cycleMin = now.getMinutes() % 5;
+    if (cycleMin === 0) return 1; // Mão Fixa
+    if (cycleMin === 1) return 3; // Mão Fixa (1) + Gale 1 (2)
+    if (cycleMin === 2) return 7; // 1 + 2 + Gale 2 (4)
+    return 0;
+  }, [new Date().getMinutes()]);
+
+  const displayedBankroll = simData.bankroll - currentBetValue;
+
   if (!topSignal) return null;
 
   return (
@@ -102,7 +114,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal }) => 
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-700">
               <p className="text-slate-500 text-xs mb-1">Banca Atual (Demo)</p>
-              <p className="text-2xl font-bold text-white">$ {simData.bankroll.toFixed(2)}</p>
+              <p className="text-2xl font-bold text-white">$ {displayedBankroll.toFixed(2)}</p>
             </div>
             <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-700">
               <p className="text-slate-500 text-xs mb-1">Lucro Acumulado</p>
