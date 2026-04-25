@@ -92,6 +92,12 @@ export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistor
               <p className="text-emerald-600 text-sm font-bold">{stats.g2}</p>
             </div>
           )}
+          {galeLimit >= 3 && (
+            <div>
+              <p className="font-semibold text-slate-300">G3</p>
+              <p className="text-emerald-700 text-sm font-bold">{stats.g3}</p>
+            </div>
+          )}
           <div>
             <p className="font-semibold text-slate-300">HIT</p>
             <p className="text-red-500 text-sm font-bold">{stats.hit}</p>
