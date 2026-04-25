@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { collection, onSnapshot, query } from 'firebase/firestore';
 import { db } from './lib/firebase';
 import { SignalCard } from './components/SignalCard';
+import { TradeSimulator } from './components/TradeSimulator';
 import { useAuth } from './contexts/AuthContext';
 import { Filter, Clock, Activity, Search, Globe, Info, CreditCard } from 'lucide-react';
 
@@ -278,6 +279,11 @@ function App() {
           </select>
         </div>
       </section>
+
+      {/* Simulador de Trades */}
+      {!loadingData && displaySignals.length > 0 && (
+        <TradeSimulator topSignal={displaySignals[0]} />
+      )}
 
       {/* Grid */}
       <main className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
