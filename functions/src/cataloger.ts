@@ -141,8 +141,12 @@ export const runCataloger = (
   patternAnalyzer: (prevBlock: Candle[]) => 'GREEN' | 'RED' | null,
   entryCandleIndex: number = 0
 ): TradeResult[] => {
-  
   const history: TradeResult[] = [];
+  const allCandles = blocks.flat();
+  
+  // Criamos um mapa para busca rápida de índice por tempo de abertura
+  const timeToIndex = new Map<number, number>();
+  allCandles.forEach((c, idx) => timeToIndex.set(c.openTime, idx));
 
   for (let i = 1; i < blocks.length; i++) {
     const prevBlock = blocks[i - 1];
@@ -158,20 +162,19 @@ export const runCataloger = (
       continue;
     }
 
+    const entryTime = currentBlock[entryCandleIndex]?.openTime;
+    const startIdx = timeToIndex.get(entryTime);
+
+    if (startIdx === undefined) {
+      continue;
+    }
+
     let result: number | null = -1;
     let isDetermined = false;
 
+    // Tenta Mão Fixa (0), Gale 1 (1) e Gale 2 (2)
     for (let attempt = 0; attempt <= 2; attempt++) {
-      let tradeCandle: Candle | undefined;
-
-      if (entryCandleIndex + attempt < currentBlock.length) {
-        tradeCandle = currentBlock[entryCandleIndex + attempt];
-      } else {
-        const nextBlockIdx = i + (attempt - (currentBlock.length - 1 - entryCandleIndex));
-        if (nextBlockIdx < blocks.length) {
-          tradeCandle = blocks[nextBlockIdx][0];
-        }
-      }
+      const tradeCandle = allCandles[startIdx + attempt];
       
       if (!tradeCandle) {
         break; 
@@ -183,6 +186,13 @@ export const runCataloger = (
         break;
       }
 
+      // Se a vela for DOJI, o resultado não é vitória nem derrota imediata para o catalogador,
+      // ele apenas segue para a próxima vela (Gale) para verificar o desfecho.
+      if (tradeCandle.color === 'DOJI') {
+        // No Martingale, o DOJI geralmente empata, então seguimos para o próximo nível.
+        continue;
+      }
+
       if (attempt === 2) {
         result = -1;
         isDetermined = true;
@@ -192,7 +202,7 @@ export const runCataloger = (
     if (isDetermined) {
       history.push({
         result: result as number,
-        time: currentBlock[0].openTime,
+        time: entryTime,
         direction: prediction === 'GREEN' ? 'CALL' : 'PUT'
       });
     }

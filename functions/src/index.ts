@@ -32,6 +32,11 @@ const M1_STRATEGIES = [
  * result = 2  → WIN G2: apostou $1+$2+$4=$7, recebeu $4*1.89=$7.56, lucro=$0.56
  * result = -1 → HIT: perdeu tudo que apostou = -$7 (G2 coberto)
  */
+/**
+ * Calcula o lucro líquido de uma operação com Martingale.
+ * IMPORTANTE: Com payout de 89% e escala 1-2-4, o lucro diminui nos Gales.
+ * Se desejar recuperação total e lucro igual à Mão Fixa, use escala 1-2.2-4.8.
+ */
 const calcProfit = (result: number): { profit: number; status: string } => {
   if (result === 0) return { profit: 0.89, status: 'WIN DIRETO' };
   if (result === 1) return { profit: 0.78, status: 'WIN GALE 1' };
@@ -131,10 +136,10 @@ export const analyzeMarketAndSave = onSchedule({
 
     const simRef = db.collection("stats").doc("global_simulator");
     const simSnap = await simRef.get();
-    const simData = simSnap.exists ? simSnap.data()! : { bankroll: 5000, lastTradeId: '', trades: [], lastCycleTime: 0 };
+    const simData = simSnap.exists ? simSnap.data()! : { bankroll: 5000, lastTradeId: '', trades: [], lastProcessedTime: 0 };
 
     const currentTradeId = `${top1.id}_${lastTime > 0 ? lastTime : `len${top1.rawHistory.length}`}`;
-    const lastCycleTime = simData.lastCycleTime || 0;
+    const lastProcessedTime = simData.lastProcessedTime || 0;
 
     const minute = new Date().getMinutes();
     const cyclePhase = minute % 5;
@@ -142,7 +147,7 @@ export const analyzeMarketAndSave = onSchedule({
     const isIdlePhase = cyclePhase >= 3;
 
     // Se temos um novo trade que concluiu AGORA (ou seja, seu tempo é maior que o do último trade processado)
-    if (lastTime > lastCycleTime) {
+    if (lastTime > lastProcessedTime) {
       const { profit, status } = calcProfit(lastResult);
       const prevBankroll = simData.bankroll ?? 5000;
       const newBankroll = prevBankroll + profit;
@@ -164,7 +169,7 @@ export const analyzeMarketAndSave = onSchedule({
       await simRef.set({
         bankroll: parseFloat(newBankroll.toFixed(2)),
         lastTradeId: currentTradeId,
-        lastCycleTime: lastTime, // TRAVA O CICLO PARA EVITAR DUPLICATAS
+        lastProcessedTime: lastTime, // TRAVA O CICLO PARA EVITAR DUPLICATAS
         lastPair: top1.id,
         currentPair: top1.pair,
         currentPattern: top1.pattern,
