@@ -105,7 +105,7 @@ export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistor
 
     let score = 0;
     const trendData: { score: number }[] = [];
-    const visualBlocks: boolean[] = [];
+    const visualBlocks: number[] = [];
 
     // Considera apenas as últimas 100 entradas para a estatística
     // Normaliza ANTES de processar — corrige o bug de rawHistory como objetos
@@ -117,14 +117,14 @@ export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistor
 
       if (isHit) {
         hit++;
-        visualBlocks.push(false);
+        visualBlocks.push(-1);
         score -= 2;
       } else {
         if (rawResult === 0) winDirect++;
         else if (rawResult === 1) g1++;
         else if (rawResult === 2) g2++;
         else if (rawResult === 3) g3++;
-        visualBlocks.push(true);
+        visualBlocks.push(rawResult);
         score += 1;
       }
       trendData.push({ score });
@@ -320,13 +320,19 @@ export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistor
               <div key={index} className="w-full h-4 rounded-sm bg-slate-700/40" />
             ))
           ) : (
-            last20Blocks.map((isWin, index) => (
-              <div
-                key={index}
-                className={`w-full h-4 rounded-sm shadow-sm ${isWin ? 'bg-emerald-500' : 'bg-red-500/80'}`}
-                title={isWin ? 'Win' : 'Loss'}
-              ></div>
-            ))
+            last20Blocks.map((res, index) => {
+              const isHit = res === -1 || res > galeLimit;
+              const label = res === 0 ? 'fixa' : res === 1 ? 'g1' : res === 2 ? 'g2' : res === 3 ? 'g3' : 'hit';
+              return (
+                <div
+                  key={index}
+                  className={`w-full h-4 rounded-sm shadow-sm flex items-center justify-center text-[7px] font-bold text-white uppercase ${isHit ? 'bg-red-500/80' : 'bg-emerald-500'}`}
+                  title={isHit ? 'Hit' : `Win ${label}`}
+                >
+                  {isHit ? 'hit' : label}
+                </div>
+              );
+            })
           )}
         </div>
       </div>
