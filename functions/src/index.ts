@@ -105,21 +105,28 @@ export const analyzeMarketAndSave = onSchedule({
         const candles = await fetchCandles(pair, '1m', 720);
         if (candles.length < 700) continue;
 
-        // Filtro de liquidez: Se o gráfico estiver "morto", não tenta simular nem catalogar
-        if (isDeadChart(candles)) {
-          console.log(`[SKIP] ${pair} - Baixa liquidez detectada no gráfico de 1m.`);
-          continue;
+        const currentStrategies = tf === 1 ? M1_STRATEGIES : M5_STRATEGIES;
+        const isDead = isDeadChart(candles);
+
+        if (isDead) {
+          console.log(`[DEAD] ${pair} - Limpando sinais por baixa liquidez.`);
         }
 
-        const blocks = groupInBlocks(candles, tf);
-        const currentStrategies = tf === 1 ? M1_STRATEGIES : M5_STRATEGIES;
-
         for (const strategy of currentStrategies) {
-          const rawHistory = runCataloger(blocks, strategy.func, strategy.entryIndex);
-
-          // Guarda apenas os últimos 100 trades catalogados
-          const filteredHistory = rawHistory.slice(-100);
           const docId = `${pair}_${strategy.name.replace(/\s+/g, '')}_M${tf}`;
+
+          if (isDead) {
+            // Se o gráfico está morto, limpamos o histórico para ele sair do ranking
+            await db.collection("signals").doc(docId).set({
+              rawHistory: [],
+              isDead: true,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            continue;
+          }
+
+          const rawHistory = runCataloger(blocks, strategy.func, strategy.entryIndex);
+          const filteredHistory = rawHistory.slice(-100);
 
           await db.collection("signals").doc(docId).set({
             id: docId,
@@ -127,6 +134,7 @@ export const analyzeMarketAndSave = onSchedule({
             pattern: strategy.name,
             timeframe: tf,
             rawHistory: filteredHistory,
+            isDead: false,
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
           });
         }
@@ -156,9 +164,17 @@ export const analyzeMarketAndSave = onSchedule({
     }
 
     const signalsData = allM5Signals.docs.map(doc => doc.data());
+    const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
 
     const sorted = signalsData
-      .filter(s => s.rawHistory && s.rawHistory.length > 0)
+      .filter(s => {
+        // Só considera sinais que:
+        // 1. Tenham histórico
+        // 2. Não estejam marcados como mortos
+        // 3. Tenham sido atualizados nos últimos 10 minutos
+        const lastUpdate = s.updatedAt?.toMillis ? s.updatedAt.toMillis() : 0;
+        return s.rawHistory && s.rawHistory.length > 0 && !s.isDead && lastUpdate > tenMinutesAgo;
+      })
       .sort((a, b) => getScore(b.rawHistory) - getScore(a.rawHistory));
 
     const top1 = sorted[0];
