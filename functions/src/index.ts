@@ -14,6 +14,7 @@ import {
   analyzeTorresGemeas,
   analyzePadrao23,
   analyzeM1Trend,
+  isDeadChart,
   TradeResult
 } from './cataloger';
 
@@ -103,6 +104,12 @@ export const analyzeMarketAndSave = onSchedule({
       try {
         const candles = await fetchCandles(pair, '1m', 720);
         if (candles.length < 700) continue;
+
+        // Filtro de liquidez: Se o gráfico estiver "morto", não tenta simular nem catalogar
+        if (isDeadChart(candles)) {
+          console.log(`[SKIP] ${pair} - Baixa liquidez detectada no gráfico de 1m.`);
+          continue;
+        }
 
         const blocks = groupInBlocks(candles, tf);
         const currentStrategies = tf === 1 ? M1_STRATEGIES : M5_STRATEGIES;

@@ -216,3 +216,30 @@ export const runCataloger = (
 
   return history;
 };
+
+/**
+ * Detecta se o gráfico está "morto" (baixa liquidez/volatilidade).
+ * Baseia-se na quantidade de DOJIs e na variedade de preços.
+ */
+export const isDeadChart = (candles: Candle[], dojiThreshold: number = 30, uniquePriceThreshold: number = 15): boolean => {
+  if (candles.length < 60) return false; // Pouco dado, não bloqueia ainda
+
+  // Analisamos as últimas 100 velas (ou o que tiver disponível)
+  const recent = candles.slice(-100);
+  const total = recent.length;
+
+  const dojis = recent.filter(c => c.color === 'DOJI').length;
+  const dojiRate = (dojis / total) * 100;
+
+  // Conta quantos níveis de preço de fechamento diferentes existem
+  const uniquePrices = new Set(recent.map(c => c.close)).size;
+
+  // Critérios:
+  // 1. Mais de X% das velas são DOJI (preço não se moveu entre abertura e fechamento)
+  // 2. Menos de Y preços diferentes em 100 velas (movimento em degraus fixos)
+  if (dojiRate > dojiThreshold || uniquePrices < uniquePriceThreshold) {
+    return true;
+  }
+
+  return false;
+};
