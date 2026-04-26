@@ -7,7 +7,7 @@ import { TradeSimulator } from './components/TradeSimulator';
 import { PayPalPayment } from './components/PayPalPayment';
 import { MercadoPagoPayment } from './components/MercadoPagoPayment';
 import { useAuth } from './contexts/AuthContext';
-import { Filter, Clock, Activity, Search, Info, LogIn } from 'lucide-react';
+import { Filter, Clock, Activity, Search, Info, LogIn, Zap } from 'lucide-react';
 
 const translations = {
   pt: {
@@ -401,6 +401,11 @@ function App() {
             lang={lang}
           />
         )}
+
+        <h2 className="text-xl font-bold text-slate-400 mb-6 flex items-center gap-2">
+          <Zap size={20} className="text-emerald-400" />
+          {lang === 'pt' ? 'Melhores Sinais Ativos' : 'Best Active Signals'}
+        </h2>
 
         <main className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {loadingData ? (
