@@ -314,10 +314,17 @@ function App() {
 
         {/* Header */}
         <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b border-slate-800 pb-4 gap-4">
-          <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent flex items-center gap-2">
-            <Activity className="text-blue-400" />
-            {t.title}
-          </h1>
+          <div>
+            <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent flex items-center gap-2">
+              <Activity className="text-blue-400" />
+              {t.title}
+            </h1>
+            <p className="text-xs text-slate-500 mt-1 max-w-md">
+              {lang === 'pt' 
+                ? 'O mais avançado robô de sinais em tempo real para Opções Binárias e IQ Option. Estratégias probabilísticas M1 e M5 com alta assertividade.' 
+                : 'The most advanced real-time signals bot for Binary Options and IQ Option. High-accuracy M1 and M5 probabilistic strategies.'}
+            </p>
+          </div>
           <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
             <button
               onClick={() => {
@@ -433,6 +440,48 @@ function App() {
             ))
           )}
         </main>
+
+        {/* SEO Footer */}
+        <footer className="mt-20 pt-8 border-t border-slate-800 text-slate-400 text-sm">
+          <article className="max-w-4xl mx-auto space-y-6">
+            <div>
+              <h3 className="text-white font-bold mb-2">
+                {lang === 'pt' ? 'O que é um Catalogador Probabilístico para Opções Binárias?' : 'What is a Probabilistic Cataloger for Binary Options?'}
+              </h3>
+              <p className="leading-relaxed">
+                {lang === 'pt' 
+                  ? 'Um catalogador probabilístico é uma ferramenta essencial para traders de opções binárias que operam em corretoras como IQ Option, Quotex e Pocket Option. Nossa inteligência artificial analisa milhares de padrões em gráficos de velas (candlesticks) em tempo real, identificando estratégias consagradas como MHI, Padrão 23, Torres Gêmeas e Sequência de Cores. Com foco em timeframes de 1 minuto (M1) e 5 minutos (M5), o robô extrai as melhores probabilidades matemáticas de vitória, permitindo que você pare de operar "no escuro" e comece a basear suas entradas em dados estatísticos reais e monitorados 24 horas por dia.'
+                  : 'A probabilistic cataloger is an essential tool for binary options traders operating on brokers like IQ Option, Quotex, and Pocket Option. Our artificial intelligence analyzes thousands of patterns in real-time candlestick charts, identifying renowned strategies such as MHI, Pattern 23, Twin Towers, and Color Sequences. Focusing on 1-minute (M1) and 5-minute (M5) timeframes, the bot extracts the highest mathematical probabilities of winning, allowing you to stop trading blindly and start basing your entries on real statistical data monitored 24/7.'}
+              </p>
+            </div>
+            
+            <div className="grid md:grid-cols-2 gap-6">
+              <div>
+                <h3 className="text-white font-bold mb-2">
+                  {lang === 'pt' ? 'Sinais VIP com Mão Fixa e Martingale' : 'VIP Signals with Fixed Hand and Martingale'}
+                </h3>
+                <p className="leading-relaxed">
+                  {lang === 'pt'
+                    ? 'Diferente de salas de sinais comuns, nosso robô de sinais entrega as oportunidades diretamente no painel. Você tem a flexibilidade de aplicar filtros rigorosos: prefere entradas conservadoras em Mão Fixa (Sem Gale)? Ou utiliza gerenciamentos com Gale 1 e Gale 2? O painel calcula a assertividade (Win Rate) ao vivo para cada par de moedas (ex: EUR/USD, GBP/JPY), mostrando o fluxo de tendência e histórico recente para garantir a maior taxa de acerto.'
+                    : 'Unlike standard signal rooms, our signal bot delivers opportunities directly to your dashboard. You have the flexibility to apply strict filters: do you prefer conservative Fixed Hand (No Gale) entries? Or do you use Gale 1 and Gale 2 money management? The dashboard calculates live Win Rate accuracy for each currency pair (e.g., EUR/USD, GBP/JPY), showing the trend flow and recent history to ensure the highest success rate.'}
+                </p>
+              </div>
+              <div>
+                <h3 className="text-white font-bold mb-2">
+                  {lang === 'pt' ? 'Vantagem Competitiva no Mercado' : 'Competitive Advantage in the Market'}
+                </h3>
+                <p className="leading-relaxed">
+                  {lang === 'pt'
+                    ? 'A consistência nas opções binárias depende de eliminar o fator emocional. Ao confiar em um catalogador automático M1 e M5, você acessa uma análise matemática fria e calculista. As estratégias probabilísticas são atualizadas segundo a segundo. Seja você um trader iniciante buscando seu primeiro lucro ou um profissional em busca de automatização, nossa ferramenta oferece o backtest automático mais rápido do mercado.'
+                    : 'Consistency in binary options depends on eliminating the emotional factor. By relying on an automatic M1 and M5 cataloger, you access cold, calculating mathematical analysis. Probabilistic strategies are updated second by second. Whether you are a beginner trader looking for your first profit or a professional seeking automation, our tool offers the fastest automatic backtesting on the market.'}
+                </p>
+              </div>
+            </div>
+            <div className="text-center mt-8 text-xs text-slate-500 pb-8">
+              &copy; {new Date().getFullYear()} Catalogador Probabilístico. {lang === 'pt' ? 'Todos os direitos reservados.' : 'All rights reserved.'}
+            </div>
+          </article>
+        </footer>
       </div>
     </PayPalScriptProvider>
   )
