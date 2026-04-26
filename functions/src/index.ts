@@ -127,6 +127,7 @@ export const analyzeMarketAndSave = onSchedule({
     const lastEntry = top1.rawHistory[top1.rawHistory.length - 1];
     const lastResult: number = typeof lastEntry === 'number' ? lastEntry : (lastEntry?.result ?? -1);
     const lastTime: number = typeof lastEntry === 'number' ? 0 : (lastEntry?.time ?? 0);
+    const lastDirection: string = typeof lastEntry === 'number' ? (Math.random() > 0.5 ? 'CALL' : 'PUT') : (lastEntry?.direction ?? (Math.random() > 0.5 ? 'CALL' : 'PUT'));
 
     const simRef = db.collection("stats").doc("global_simulator");
     const simSnap = await simRef.get();
@@ -136,13 +137,12 @@ export const analyzeMarketAndSave = onSchedule({
     // Se não há timestamp no trade, usamos o comprimento do array como fallback único
     const currentTradeId = `${top1.id}_${lastTime > 0 ? lastTime : `len${top1.rawHistory.length}`}`;
 
-    // CORREÇÃO BUG 2: Não fazemos early return — sempre verificamos se há trade novo
     if (simData.lastTradeId === currentTradeId) {
       // Nenhum trade novo desde a última execução, atualiza apenas par/padrão ativos
       await simRef.set({
         currentPair: top1.pair,
         currentPattern: top1.pattern,
-        currentDirection: Math.random() > 0.5 ? 'CALL' : 'PUT',
+        currentDirection: lastDirection,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
       console.log("Nenhum trade novo. Par/padrão atualizados.");
@@ -154,7 +154,7 @@ export const analyzeMarketAndSave = onSchedule({
     const prevBankroll = simData.bankroll ?? 5000;
     const newBankroll = prevBankroll + profit;
 
-    const direction = Math.random() > 0.5 ? 'CALL' : 'PUT';
+    const direction = lastDirection;
 
     const newTrade = {
       id: currentTradeId,

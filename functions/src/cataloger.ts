@@ -133,6 +133,7 @@ export const analyzeM1Trend = (candles: Candle[]): 'GREEN' | 'RED' | null => {
 export interface TradeResult {
   result: number;
   time: number;
+  direction?: 'CALL' | 'PUT';
 }
 
 export const runCataloger = (
@@ -191,7 +192,8 @@ export const runCataloger = (
     if (isDetermined) {
       history.push({
         result: result as number,
-        time: currentBlock[0].openTime
+        time: currentBlock[0].openTime,
+        direction: prediction === 'GREEN' ? 'CALL' : 'PUT'
       });
     }
   }
