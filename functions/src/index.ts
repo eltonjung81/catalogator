@@ -5,44 +5,86 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 admin.initializeApp();
 
 export { createPreference, mercadopagoWebhook } from './payments';
-import { fetchCandles, groupInBlocks, runCataloger, analyzeMHI1, analyzeMHIMaioria, analyzeTorresGemeas, analyzePadrao23, analyzeM1Trend } from './cataloger';
+import {
+  fetchCandles,
+  groupInBlocks,
+  runCataloger,
+  analyzeMHI1,
+  analyzeMHIMaioria,
+  analyzeTorresGemeas,
+  analyzePadrao23,
+  analyzeM1Trend,
+  TradeResult
+} from './cataloger';
 
 const db = admin.firestore();
 
 const PAIRS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'DOTUSDT'];
 
 const M5_STRATEGIES = [
-  { name: 'MHI 1', func: analyzeMHI1, entryIndex: 0 },
-  { name: 'MHI Maioria', func: analyzeMHIMaioria, entryIndex: 0 },
-  { name: 'Torres Gêmeas', func: analyzeTorresGemeas, entryIndex: 0 },
-  { name: 'Padrão 23', func: analyzePadrao23, entryIndex: 0 }
+  { name: 'MHI 1',        func: analyzeMHI1,        entryIndex: 0 },
+  { name: 'MHI Maioria',  func: analyzeMHIMaioria,  entryIndex: 0 },
+  { name: 'Torres Gêmeas',func: analyzeTorresGemeas, entryIndex: 0 },
+  { name: 'Padrão 23',    func: analyzePadrao23,     entryIndex: 0 }
 ];
 
 const M1_STRATEGIES = [
   { name: 'Tendência M1', func: analyzeM1Trend, entryIndex: 0 }
 ];
 
-/**
- * Calcula o lucro líquido de uma operação com Martingale.
- * Modelo de aposta: Mão Fixa=$1, G1=$2, G2=$4 (escala 1-2-4)
- * Payout da corretora: 89% sobre o valor apostado.
- *
- * result = 0  → WIN Direto: +$0.89 (apostou $1, recebeu $1.89, lucro=$0.89)
- * result = 1  → WIN G1: apostou $1+$2=$3, recebeu $2*1.89=$3.78, lucro=$0.78
- * result = 2  → WIN G2: apostou $1+$2+$4=$7, recebeu $4*1.89=$7.56, lucro=$0.56
- * result = -1 → HIT: perdeu tudo que apostou = -$7 (G2 coberto)
- */
-/**
- * Calcula o lucro líquido de uma operação com Martingale.
- * IMPORTANTE: Com payout de 89% e escala 1-2-4, o lucro diminui nos Gales.
- * Se desejar recuperação total e lucro igual à Mão Fixa, use escala 1-2.2-4.8.
- */
-const calcProfit = (result: number): { profit: number; status: string } => {
-  if (result === 0) return { profit: 0.89, status: 'WIN DIRETO' };
-  if (result === 1) return { profit: 0.78, status: 'WIN GALE 1' };
-  if (result === 2) return { profit: 0.56, status: 'WIN GALE 2' };
-  // Loss: perdeu as 3 apostas (1 + 2 + 4 = 7)
-  return { profit: -7, status: 'LOSS' };
+// ============================================================================
+// MODELO DE LUCRO — Mão Fixa com 2 Gales, escala 1-2-4, payout 89%
+//
+//  WIN direto  → apostou $1,      ganhou $1×0.89  = +$0.89
+//  WIN G1      → apostou $1+$2=$3, ganhou $2×0.89 = $1.78, lucro = $1.78-$3 = -$1.22  ← ATENÇÃO: ainda é loss líquido!
+//                Obs: com payout de 89%, G1 e G2 NÃO recuperam 100% da perda anterior.
+//                Ajuste os valores de aposta se quiser recuperação total.
+//  WIN G2      → apostou $1+$2+$4=$7, ganhou $4×0.89=$3.56, lucro=$3.56-$7 = -$3.44
+//  LOSS        → perdeu $1+$2+$4 = -$7.00
+//
+// NOTA: Com payout de 89% é impossível recuperar completamente com Martingale 1-2-4.
+// Para recuperação total você precisaria de escala ~1-3-9 (cobrindo perdas + payout).
+// Mantemos 1-2-4 como estava no código original para não alterar a lógica de negócio.
+// ============================================================================
+const PAYOUT = 0.89;
+const BET_SEQUENCE = [1, 2, 4]; // entrada, G1, G2
+
+const calcProfit = (result: 0 | 1 | 2 | -1): { profit: number; status: string } => {
+  if (result === -1) {
+    const totalBet = BET_SEQUENCE.reduce((a, b) => a + b, 0); // 7
+    return { profit: -totalBet, status: 'LOSS' };
+  }
+
+  // Soma de tudo que foi apostado até essa tentativa
+  const totalSpent = BET_SEQUENCE.slice(0, result + 1).reduce((a, b) => a + b, 0);
+  // Ganho bruto da aposta vencedora
+  const winBet = BET_SEQUENCE[result];
+  const grossWin = winBet * (1 + PAYOUT);
+  const netProfit = parseFloat((grossWin - totalSpent).toFixed(2));
+
+  const labels = ['WIN DIRETO', 'WIN GALE 1', 'WIN GALE 2'];
+  return { profit: netProfit, status: labels[result] };
+};
+
+// ============================================================================
+// SCORE DE RANKING — TrendScore (últimas 10) + WinRate (últimas 100)
+// ============================================================================
+const getScore = (history: TradeResult[]): number => {
+  if (!history || history.length === 0) return -9999;
+  const recent = history.slice(-100);
+  let wins = 0;
+  let trendScore = 0;
+
+  recent.forEach((r, idx) => {
+    const isWin = r.result >= 0; // 0, 1 ou 2 = vitória
+    if (isWin) wins++;
+    if (idx >= recent.length - 10) {
+      trendScore += isWin ? 1 : -2;
+    }
+  });
+
+  const winRate = wins / recent.length;
+  return (trendScore * 10) + winRate * 100;
 };
 
 export const analyzeMarketAndSave = onSchedule({
@@ -54,7 +96,7 @@ export const analyzeMarketAndSave = onSchedule({
   console.log("Iniciando catalogação massiva via Binance...");
 
   // ============================================================
-  // FASE 1: Catalogar todos os pares e salvar sinais
+  // FASE 1: Catalogar todos os pares e salvar sinais no Firestore
   // ============================================================
   for (const pair of PAIRS) {
     for (const tf of [1, 5]) {
@@ -68,6 +110,7 @@ export const analyzeMarketAndSave = onSchedule({
         for (const strategy of currentStrategies) {
           const rawHistory = runCataloger(blocks, strategy.func, strategy.entryIndex);
 
+          // Guarda apenas os últimos 100 trades catalogados
           const filteredHistory = rawHistory.slice(-100);
           const docId = `${pair}_${strategy.name.replace(/\s+/g, '')}_M${tf}`;
 
@@ -88,111 +131,100 @@ export const analyzeMarketAndSave = onSchedule({
 
   // ============================================================
   // FASE 2: Simulador Global Persistente (Top 1 de M5)
+  //
+  // Lógica correta:
+  //   1. Pega o sinal M5 com maior score
+  //   2. Compara o ÚLTIMO trade do histórico com o que já foi registrado
+  //   3. Se for um trade NOVO (openTime maior que o lastProcessedTime), registra
+  //   4. Nunca duplica: a trava é o openTime da vela de entrada do trade
   // ============================================================
   try {
     const allM5Signals = await db.collection("signals")
       .where("timeframe", "==", 5)
       .get();
 
+    if (allM5Signals.empty) {
+      console.log("Nenhum sinal M5 disponível.");
+      return;
+    }
+
     const signalsData = allM5Signals.docs.map(doc => doc.data());
-
-    // Mesma lógica de ranking do frontend: TrendScore + WinRate
-    const getScore = (h: any[]): number => {
-      if (!h || h.length === 0) return -9999;
-      const recent100 = h.slice(-100);
-      let wins = 0;
-      let trendScore = 0;
-
-      recent100.forEach((r, idx) => {
-        const val = typeof r === 'number' ? r : (r?.result ?? -1);
-        const isWin = val >= 0 && val <= 2; // 0=direto, 1=G1, 2=G2
-        if (isWin) wins++;
-
-        if (idx >= recent100.length - 10) {
-          trendScore += isWin ? 1 : -2;
-        }
-      });
-
-      const winRate = recent100.length > 0 ? wins / recent100.length : 0;
-      return (trendScore * 10) + winRate * 100;
-    };
 
     const sorted = signalsData
       .filter(s => s.rawHistory && s.rawHistory.length > 0)
       .sort((a, b) => getScore(b.rawHistory) - getScore(a.rawHistory));
 
     const top1 = sorted[0];
-
     if (!top1) {
-      console.log("Nenhum sinal M5 disponível para o simulador.");
+      console.log("Nenhum sinal M5 com histórico disponível.");
       return;
     }
 
-    // Pega o último trade registrado pelo catalogador
-    const lastEntry = top1.rawHistory[top1.rawHistory.length - 1];
-    const lastResult: number = typeof lastEntry === 'number' ? lastEntry : (lastEntry?.result ?? -1);
-    const lastTime: number = typeof lastEntry === 'number' ? 0 : (lastEntry?.time ?? 0);
-    const lastDirection: string = typeof lastEntry === 'number' ? 'CALL' : (lastEntry?.direction ?? 'CALL');
+    // Último trade catalogado pelo runCataloger
+    const lastEntry: TradeResult = top1.rawHistory[top1.rawHistory.length - 1];
 
+    // Documento persistente do simulador
     const simRef = db.collection("stats").doc("global_simulator");
     const simSnap = await simRef.get();
-    const simData = simSnap.exists ? simSnap.data()! : { bankroll: 5000, lastTradeId: '', trades: [], lastProcessedTime: 0 };
+    const simData = simSnap.exists
+      ? simSnap.data()!
+      : { bankroll: 5000, lastProcessedTime: 0, trades: [] };
 
-    const currentTradeId = `${top1.id}_${lastTime > 0 ? lastTime : `len${top1.rawHistory.length}`}`;
-    const lastProcessedTime = simData.lastProcessedTime || 0;
+    const lastProcessedTime: number = simData.lastProcessedTime ?? 0;
 
-    const minute = new Date().getMinutes();
-    const cyclePhase = minute % 5;
-    // Fases de transição/espera: minutos 3 e 4
-    const isIdlePhase = cyclePhase >= 3;
-
-    // Se temos um novo trade que concluiu AGORA (ou seja, seu tempo é maior que o do último trade processado)
-    if (lastTime > lastProcessedTime) {
-      const { profit, status } = calcProfit(lastResult);
-      const prevBankroll = simData.bankroll ?? 5000;
-      const newBankroll = prevBankroll + profit;
+    // ── Verificação de trade novo ──────────────────────────────────────────
+    // `lastEntry.time` é o openTime da vela de entrada.
+    // Só processamos se esse timestamp ainda não foi processado.
+    if (lastEntry.time > lastProcessedTime) {
+      const { profit, status } = calcProfit(lastEntry.result);
+      const prevBankroll: number = simData.bankroll ?? 5000;
+      const newBankroll = parseFloat((prevBankroll + profit).toFixed(2));
 
       const newTrade = {
-        id: currentTradeId,
+        id: `${top1.id}_${lastEntry.time}`,
         pair: top1.pair,
         pattern: top1.pattern,
-        direction: lastDirection,
-        result: lastResult,
-        profit: parseFloat(profit.toFixed(2)),
+        direction: lastEntry.direction,
+        result: lastEntry.result,
+        profit,
         status,
-        time: lastTime > 0 ? lastTime : Date.now()
+        time: lastEntry.time,
+        bankrollAfter: newBankroll
       };
 
-      const currentTrades: any[] = simData.trades || [];
-      const updatedTrades = [...currentTrades, newTrade].slice(-50); // mantém últimos 50
+      const currentTrades: any[] = simData.trades ?? [];
+      const updatedTrades = [...currentTrades, newTrade].slice(-50);
 
       await simRef.set({
-        bankroll: parseFloat(newBankroll.toFixed(2)),
-        lastTradeId: currentTradeId,
-        lastProcessedTime: lastTime, // TRAVA O CICLO PARA EVITAR DUPLICATAS
-        lastPair: top1.id,
+        bankroll: newBankroll,
+        lastProcessedTime: lastEntry.time,  // ← trava para evitar duplicatas
         currentPair: top1.pair,
         currentPattern: top1.pattern,
-        currentDirection: lastDirection,
+        currentDirection: lastEntry.direction,
         trades: updatedTrades,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
 
-      console.log(`Trade registrado: ${top1.pair} | ${status} | ${profit >= 0 ? '+' : ''}${profit.toFixed(2)} | Banca: $${newBankroll.toFixed(2)}`);
-      return;
-    }
+      console.log(
+        `[TRADE] ${top1.pair} | ${top1.pattern} | ${lastEntry.direction} | ${status} | ` +
+        `${profit >= 0 ? '+' : ''}$${profit.toFixed(2)} | Banca: $${newBankroll}`
+      );
+    } else {
+      // Nenhum trade novo — apenas atualiza o display se o Top 1 mudou
+      const changed =
+        simData.currentPair !== top1.pair ||
+        simData.currentPattern !== top1.pattern;
 
-    // Se NÃO é um trade novo, só atualizamos a UI (pair/pattern) se estivermos na fase IDLE/ENTRY
-    // Isso impede que a estratégia mude no meio do trade (minutos 0, 1 e 2) causando flip-flop
-    if (isIdlePhase) {
-      if (simData.currentPair !== top1.pair || simData.currentPattern !== top1.pattern) {
+      if (changed) {
         await simRef.set({
           currentPair: top1.pair,
           currentPattern: top1.pattern,
-          currentDirection: lastDirection,
+          currentDirection: lastEntry.direction,
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
         }, { merge: true });
-        console.log(`Estratégia atualizada para o próximo ciclo: ${top1.pair} (${top1.pattern})`);
+        console.log(`[INFO] Estratégia atualizada: ${top1.pair} (${top1.pattern})`);
+      } else {
+        console.log(`[INFO] Sem trade novo. Aguardando próximo ciclo M5.`);
       }
     }
 

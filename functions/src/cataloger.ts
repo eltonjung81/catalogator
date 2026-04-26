@@ -17,34 +17,43 @@ export const fetchCandles = async (symbol: string, interval: string = '1m', limi
     const response = await axios.get(url);
     
     const now = Date.now();
-    // O retorno da Binance é um array de arrays
-    // Filtramos data[6] (close time) para ignorar a vela atual que ainda está oscilando (aberta)
     return response.data
       .filter((data: any[]) => now > data[6])
       .map((data: any[]) => {
-      const open = parseFloat(data[1]);
-      const close = parseFloat(data[4]);
-      let color: 'GREEN' | 'RED' | 'DOJI' = 'DOJI';
-      if (close > open) color = 'GREEN';
-      if (close < open) color = 'RED';
+        const open = parseFloat(data[1]);
+        const close = parseFloat(data[4]);
+        let color: 'GREEN' | 'RED' | 'DOJI' = 'DOJI';
+        if (close > open) color = 'GREEN';
+        if (close < open) color = 'RED';
 
-      return {
-        openTime: data[0],
-        open,
-        high: parseFloat(data[2]),
-        low: parseFloat(data[3]),
-        close,
-        color
-      };
-    });
+        return {
+          openTime: data[0],
+          open,
+          high: parseFloat(data[2]),
+          low: parseFloat(data[3]),
+          close,
+          color
+        };
+      });
   } catch (error) {
     console.error(`Erro ao buscar candles para ${symbol}:`, error);
     return [];
   }
 };
 
-// Agrupa velas de M1 em blocos de 5 minutos
-// (A vela M1 00:00, 00:01, 00:02, 00:03, 00:04 formam o bloco das 00:00)
+// Achata todos os blocos em uma lista plana de velas com índice global
+// Isso facilita buscar a vela N posições à frente de qualquer ponto
+const flattenBlocks = (blocks: Candle[][]): Candle[] => {
+  return blocks.reduce((acc, block) => acc.concat(block), []);
+};
+
+// Dado um array plano de velas e um openTime de referência,
+// retorna o índice dessa vela no array plano (ou -1 se não encontrar)
+const findCandleIndex = (flat: Candle[], openTime: number): number => {
+  return flat.findIndex(c => c.openTime === openTime);
+};
+
+// Agrupa velas de M1 em blocos de N minutos
 export const groupInBlocks = (candles: Candle[], blockSize: number = 5): Candle[][] => {
   const blocks: Candle[][] = [];
   let currentBlock: Candle[] = [];
@@ -53,7 +62,6 @@ export const groupInBlocks = (candles: Candle[], blockSize: number = 5): Candle[
     const date = new Date(candle.openTime);
     const minute = date.getMinutes();
 
-    // Começa um novo bloco quando o minuto é múltiplo do blockSize (ex: 0, 5, 10...)
     if (minute % blockSize === 0 && currentBlock.length > 0) {
       blocks.push(currentBlock);
       currentBlock = [];
@@ -70,18 +78,15 @@ export const groupInBlocks = (candles: Candle[], blockSize: number = 5): Candle[
 
 // ============================================================================
 // LÓGICAS DOS PADRÕES
-// Cada função de padrão recebe o bloco anterior (para análise) 
-// e retorna a COR PREVISTA ('GREEN' ou 'RED') ou null se não houver entrada
 // ============================================================================
 
 export const analyzeMHI1 = (previousBlock: Candle[]): 'GREEN' | 'RED' | null => {
   if (previousBlock.length < 5) return null;
-  // Analisa as últimas 3 velas do bloco (índices 2, 3, 4)
   const last3 = previousBlock.slice(-3);
   const greens = last3.filter(c => c.color === 'GREEN').length;
   const reds = last3.filter(c => c.color === 'RED').length;
   
-  if (greens === 0 && reds === 0) return null; // 3 Dojis
+  if (greens === 0 && reds === 0) return null;
   return greens < reds ? 'GREEN' : 'RED'; // Minoria
 };
 
@@ -97,20 +102,16 @@ export const analyzeMHIMaioria = (previousBlock: Candle[]): 'GREEN' | 'RED' | nu
 
 export const analyzeTorresGemeas = (previousBlock: Candle[]): 'GREEN' | 'RED' | null => {
   if (previousBlock.length < 5) return null;
-  // A previsão é igual à última vela do bloco anterior
   const lastCandle = previousBlock[previousBlock.length - 1];
   return lastCandle.color !== 'DOJI' ? lastCandle.color : null;
 };
 
 export const analyzePadrao23 = (previousBlock: Candle[]): 'GREEN' | 'RED' | null => {
   if (previousBlock.length < 5) return null;
-  // Observa a vela 2 e 3. Se iguais, a entrada é a minoria entre as duas?
-  // Simplificação comum: A entrada é a cor da vela 2
   const candle2 = previousBlock[1];
   return candle2.color !== 'DOJI' ? candle2.color : null;
 };
 
-// Nova estratégia para Timeframe de 1 Minuto
 export const analyzeM1Trend = (candles: Candle[]): 'GREEN' | 'RED' | null => {
   if (candles.length < 1) return null;
   const lastCandle = candles[candles.length - 1];
@@ -118,94 +119,99 @@ export const analyzeM1Trend = (candles: Candle[]): 'GREEN' | 'RED' | null => {
 };
 
 // ============================================================================
-// SIMULADOR DE HISTÓRICO
-// Roda o padrão contra os blocos recentes e extrai a sequência crua de resultados
+// RESULTADO DO TRADE
+//  0  = WIN direto (sem gale)
+//  1  = WIN no Gale 1
+//  2  = WIN no Gale 2
+// -1  = LOSS (perdeu direto + G1 + G2)
+// null = Não operou (sinal nulo ou velas insuficientes)
 // ============================================================================
 
-// O resultado será um array numérico que indica o desfecho:
-// 0 = WIN (Vitória de primeira)
-// 1 = GALE 1 (Vitória no primeiro gale)
-// 2 = GALE 2 (Vitória no segundo gale)
-// 3 = GALE 3 (Vitória no terceiro gale)
-// -1 = HIT (Loss total)
-// null = Não operou
-
 export interface TradeResult {
-  result: number;
+  result: 0 | 1 | 2 | -1;
   time: number;
-  direction?: 'CALL' | 'PUT';
+  direction: 'CALL' | 'PUT';
 }
 
+// ============================================================================
+// CATALOGADOR CORRIGIDO
+//
+// Estratégia com 2 gales:
+//   - Entrada principal  → vela [entryCandleIndex] do bloco atual
+//   - Gale 1             → próxima vela após a entrada
+//   - Gale 2             → vela seguinte ao Gale 1
+//
+// A busca da vela usa o array plano para nunca perder o fio
+// entre blocos (ex: entrada é última vela do bloco, gales caem no bloco seguinte).
+// ============================================================================
+
 export const runCataloger = (
-  blocks: Candle[][], 
+  blocks: Candle[][],
   patternAnalyzer: (prevBlock: Candle[]) => 'GREEN' | 'RED' | null,
   entryCandleIndex: number = 0
 ): TradeResult[] => {
-  const history: TradeResult[] = [];
-  const allCandles = blocks.flat();
   
-  // Criamos um mapa para busca rápida de índice por tempo de abertura
-  const timeToIndex = new Map<number, number>();
-  allCandles.forEach((c, idx) => timeToIndex.set(c.openTime, idx));
+  const history: TradeResult[] = [];
+
+  // Array plano: facilita navegar N velas à frente sem se preocupar com fronteiras de bloco
+  const flat = flattenBlocks(blocks);
 
   for (let i = 1; i < blocks.length; i++) {
     const prevBlock = blocks[i - 1];
     const currentBlock = blocks[i];
 
-    if (prevBlock.length < 1 || currentBlock.length < 1) {
+    // Precisa de blocos com conteúdo suficiente
+    if (prevBlock.length < 1 || currentBlock.length <= entryCandleIndex) {
       continue;
     }
 
+    // Analisa o bloco anterior para decidir a direção
     const prediction = patternAnalyzer(prevBlock);
-    
-    if (!prediction) {
-      continue;
-    }
+    if (!prediction) continue;
 
-    const entryTime = currentBlock[entryCandleIndex]?.openTime;
-    const startIdx = timeToIndex.get(entryTime);
+    // Vela de entrada: posição `entryCandleIndex` dentro do bloco atual
+    const entryCandle = currentBlock[entryCandleIndex];
+    const entryFlatIdx = findCandleIndex(flat, entryCandle.openTime);
 
-    if (startIdx === undefined) {
-      continue;
-    }
+    // Se não encontramos a vela no array plano, pula
+    if (entryFlatIdx === -1) continue;
 
-    let result: number | null = -1;
-    let isDetermined = false;
+    // Simula até 3 tentativas: entrada + G1 + G2
+    let tradeResult: 0 | 1 | 2 | -1 = -1; // padrão: loss se não bater em nenhuma
 
-    // Tenta Mão Fixa (0), Gale 1 (1) e Gale 2 (2)
     for (let attempt = 0; attempt <= 2; attempt++) {
-      const tradeCandle = allCandles[startIdx + attempt];
-      
-      if (!tradeCandle) {
-        break; 
-      }
+      const candleFlatIdx = entryFlatIdx + attempt;
 
-      if (tradeCandle.color === prediction) {
-        result = attempt;
-        isDetermined = true;
+      // Não há velas suficientes para completar esse gale (fim do histórico)
+      if (candleFlatIdx >= flat.length) {
+        tradeResult = -1;
         break;
       }
 
-      // Se a vela for DOJI, o resultado não é vitória nem derrota imediata para o catalogador,
-      // ele apenas segue para a próxima vela (Gale) para verificar o desfecho.
+      const tradeCandle = flat[candleFlatIdx];
+
       if (tradeCandle.color === 'DOJI') {
-        // No Martingale, o DOJI geralmente empata, então seguimos para o próximo nível.
+        // DOJI: a maioria dos traders considera empate e não avança o gale.
+        // Aqui tratamos como "não venceu nessa vela" e avança para o gale.
         continue;
       }
 
+      if (tradeCandle.color === prediction) {
+        tradeResult = attempt as 0 | 1 | 2;
+        break;
+      }
+
+      // Se chegou na última tentativa (G2) e não ganhou: LOSS
       if (attempt === 2) {
-        result = -1;
-        isDetermined = true;
+        tradeResult = -1;
       }
     }
 
-    if (isDetermined) {
-      history.push({
-        result: result as number,
-        time: entryTime,
-        direction: prediction === 'GREEN' ? 'CALL' : 'PUT'
-      });
-    }
+    history.push({
+      result: tradeResult,
+      time: entryCandle.openTime,
+      direction: prediction === 'GREEN' ? 'CALL' : 'PUT'
+    });
   }
 
   return history;
