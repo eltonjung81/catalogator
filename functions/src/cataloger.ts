@@ -17,8 +17,9 @@ export const fetchCandles = async (symbol: string, interval: string = '1m', limi
     const response = await axios.get(url);
     
     const now = Date.now();
+    const buffer = 2000; // 2 segundos de buffer para garantir que a vela fechou na API
     return response.data
-      .filter((data: any[]) => now > data[6])
+      .filter((data: any[]) => (now - buffer) > data[6])
       .map((data: any[]) => {
         const open = parseFloat(data[1]);
         const close = parseFloat(data[4]);
@@ -177,22 +178,22 @@ export const runCataloger = (
     if (entryFlatIdx === -1) continue;
 
     // Simula até 3 tentativas: entrada + G1 + G2
-    let tradeResult: 0 | 1 | 2 | -1 = -1; // padrão: loss se não bater em nenhuma
+    let tradeResult: 0 | 1 | 2 | -1 | null = null; 
 
     for (let attempt = 0; attempt <= 2; attempt++) {
       const candleFlatIdx = entryFlatIdx + attempt;
 
-      // Não há velas suficientes para completar esse gale (fim do histórico)
+      // Se não há velas suficientes para completar esse gale (fim do histórico),
+      // não definimos o resultado ainda (fica null) e paramos a análise deste trade.
       if (candleFlatIdx >= flat.length) {
-        tradeResult = -1;
+        tradeResult = null;
         break;
       }
 
       const tradeCandle = flat[candleFlatIdx];
 
       if (tradeCandle.color === 'DOJI') {
-        // DOJI: a maioria dos traders considera empate e não avança o gale.
-        // Aqui tratamos como "não venceu nessa vela" e avança para o gale.
+        // DOJI: continua para o próximo gale
         continue;
       }
 
@@ -207,11 +208,15 @@ export const runCataloger = (
       }
     }
 
-    history.push({
-      result: tradeResult,
-      time: entryCandle.openTime,
-      direction: prediction === 'GREEN' ? 'CALL' : 'PUT'
-    });
+    // Só adicionamos ao histórico se o trade foi REALMENTE finalizado
+    // (Ou ganhou em algum nível, ou perdeu todos os gales disponíveis)
+    if (tradeResult !== null) {
+      history.push({
+        result: tradeResult,
+        time: entryCandle.openTime,
+        direction: prediction === 'GREEN' ? 'CALL' : 'PUT'
+      });
+    }
   }
 
   return history;
