@@ -112,6 +112,8 @@ export const analyzeMarketAndSave = onSchedule({
           console.log(`[DEAD] ${pair} - Limpando sinais por baixa liquidez.`);
         }
 
+        const blocks = groupInBlocks(candles, tf);
+
         for (const strategy of currentStrategies) {
           const docId = `${pair}_${strategy.name.replace(/\s+/g, '')}_M${tf}`;
 
