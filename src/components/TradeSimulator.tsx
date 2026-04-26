@@ -234,7 +234,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang 
     }
     if (phase === 'ENTRY') {
       return {
-        msg: `${t.patternDetected} ${t.entering} ${direction} ${lang === 'pt' ? 'em' : 'in'} ${pair} (${pattern})`,
+        msg: `${t.patternDetected} ${t.entering} ${lang === 'pt' ? 'em' : 'in'} ${pair} (${pattern})`,
         subMsg: t.waitingCandle,
         bgClass: 'bg-amber-500/10 border-amber-500/30',
         dotClass: 'bg-amber-500 animate-ping',

@@ -127,61 +127,69 @@ export const analyzeMarketAndSave = onSchedule({
     const lastEntry = top1.rawHistory[top1.rawHistory.length - 1];
     const lastResult: number = typeof lastEntry === 'number' ? lastEntry : (lastEntry?.result ?? -1);
     const lastTime: number = typeof lastEntry === 'number' ? 0 : (lastEntry?.time ?? 0);
-    const lastDirection: string = typeof lastEntry === 'number' ? (Math.random() > 0.5 ? 'CALL' : 'PUT') : (lastEntry?.direction ?? (Math.random() > 0.5 ? 'CALL' : 'PUT'));
+    const lastDirection: string = typeof lastEntry === 'number' ? 'CALL' : (lastEntry?.direction ?? 'CALL');
 
     const simRef = db.collection("stats").doc("global_simulator");
     const simSnap = await simRef.get();
-    const simData = simSnap.exists ? simSnap.data()! : { bankroll: 5000, lastTradeId: '', trades: [] };
+    const simData = simSnap.exists ? simSnap.data()! : { bankroll: 5000, lastTradeId: '', trades: [], lastCycleTime: 0 };
 
-    // ID único e imutável para este trade: combina docId + tempo da vela
-    // Se não há timestamp no trade, usamos o comprimento do array como fallback único
     const currentTradeId = `${top1.id}_${lastTime > 0 ? lastTime : `len${top1.rawHistory.length}`}`;
+    const lastCycleTime = simData.lastCycleTime || 0;
 
-    if (simData.lastTradeId === currentTradeId) {
-      // Nenhum trade novo desde a última execução, atualiza apenas par/padrão ativos
+    const minute = new Date().getMinutes();
+    const cyclePhase = minute % 5;
+    // Fases de transição/espera: minutos 3 e 4
+    const isIdlePhase = cyclePhase >= 3;
+
+    // Se temos um novo trade que concluiu AGORA (ou seja, seu tempo é maior que o do último trade processado)
+    if (lastTime > lastCycleTime) {
+      const { profit, status } = calcProfit(lastResult);
+      const prevBankroll = simData.bankroll ?? 5000;
+      const newBankroll = prevBankroll + profit;
+
+      const newTrade = {
+        id: currentTradeId,
+        pair: top1.pair,
+        pattern: top1.pattern,
+        direction: lastDirection,
+        result: lastResult,
+        profit: parseFloat(profit.toFixed(2)),
+        status,
+        time: lastTime > 0 ? lastTime : Date.now()
+      };
+
+      const currentTrades: any[] = simData.trades || [];
+      const updatedTrades = [...currentTrades, newTrade].slice(-50); // mantém últimos 50
+
       await simRef.set({
+        bankroll: parseFloat(newBankroll.toFixed(2)),
+        lastTradeId: currentTradeId,
+        lastCycleTime: lastTime, // TRAVA O CICLO PARA EVITAR DUPLICATAS
+        lastPair: top1.id,
         currentPair: top1.pair,
         currentPattern: top1.pattern,
         currentDirection: lastDirection,
+        trades: updatedTrades,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
-      console.log("Nenhum trade novo. Par/padrão atualizados.");
+
+      console.log(`Trade registrado: ${top1.pair} | ${status} | ${profit >= 0 ? '+' : ''}${profit.toFixed(2)} | Banca: $${newBankroll.toFixed(2)}`);
       return;
     }
 
-    // Novo trade detectado — calcular e registrar
-    const { profit, status } = calcProfit(lastResult);
-    const prevBankroll = simData.bankroll ?? 5000;
-    const newBankroll = prevBankroll + profit;
-
-    const direction = lastDirection;
-
-    const newTrade = {
-      id: currentTradeId,
-      pair: top1.pair,
-      pattern: top1.pattern,
-      direction,
-      result: lastResult,    // 0, 1, 2 ou -1
-      profit: parseFloat(profit.toFixed(2)),
-      status,
-      time: lastTime > 0 ? lastTime : Date.now()
-    };
-
-    const currentTrades: any[] = simData.trades || [];
-    const updatedTrades = [...currentTrades, newTrade].slice(-50); // mantém últimos 50
-
-    await simRef.set({
-      bankroll: parseFloat(newBankroll.toFixed(2)),
-      lastTradeId: currentTradeId,
-      lastPair: top1.id,
-      currentPair: top1.pair,
-      currentPattern: top1.pattern,
-      currentDirection: direction,
-      trades: updatedTrades,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
-
-    console.log(`Trade registrado: ${top1.pair} | ${status} | ${profit >= 0 ? '+' : ''}${profit.toFixed(2)} | Banca: $${newBankroll.toFixed(2)}`);
+    // Se NÃO é um trade novo, só atualizamos a UI (pair/pattern) se estivermos na fase IDLE/ENTRY
+    // Isso impede que a estratégia mude no meio do trade (minutos 0, 1 e 2) causando flip-flop
+    if (isIdlePhase) {
+      if (simData.currentPair !== top1.pair || simData.currentPattern !== top1.pattern) {
+        await simRef.set({
+          currentPair: top1.pair,
+          currentPattern: top1.pattern,
+          currentDirection: lastDirection,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        console.log(`Estratégia atualizada para o próximo ciclo: ${top1.pair} (${top1.pattern})`);
+      }
+    }
 
   } catch (error) {
     console.error("Erro no Simulador Global:", error);
