@@ -31,12 +31,6 @@ interface SimData {
 }
 
 interface TradeSimulatorProps {
-  topSignal: {
-    pair: string;
-    pattern: string;
-    rawHistory: any[];
-  } | null;
-  galeLimit: number;
   lang: 'pt' | 'en';
 }
 
@@ -90,7 +84,7 @@ const START_DATE = new Date('2026-03-13T00:00:00');
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 
-export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang }) => {
+export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ lang }) => {
   const t = T[lang];
   const [simData, setSimData] = useState<SimData>({
     phase: 'IDLE',
@@ -163,8 +157,8 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang 
 
   // ─── Dados derivados ────────────────────────────────────────────────────────
 
-  const pair      = simData.currentPair      || topSignal?.pair    || '---';
-  const pattern   = simData.currentPattern   || topSignal?.pattern || '---';
+  const pair      = simData.currentPair      || '---';
+  const pattern   = simData.currentPattern   || '---';
   const direction = simData.currentDirection || '---';
 
   // Banca display: deduz a aposta em aberto
@@ -256,8 +250,6 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang 
       icon: <Clock size={32} className="text-slate-600" />
     };
   })();
-
-  if (!topSignal) return null;
 
   return (
     <div className={`relative rounded-2xl p-6 mb-8 overflow-hidden transition-all duration-500 ${

@@ -401,13 +401,7 @@ function App() {
           </div>
         </section>
 
-        {!loadingData && signals.length > 0 && (
-          <TradeSimulator
-            topSignal={displaySignals.find(s => s.timeframe === selectedTimeframe) || displaySignals[0] || null}
-            galeLimit={galeLimit}
-            lang={lang}
-          />
-        )}
+        <TradeSimulator lang={lang} />
 
         <h2 className="text-xl font-bold text-slate-400 mb-6 flex items-center gap-2">
           <Zap size={20} className="text-emerald-400" />
