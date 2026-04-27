@@ -175,33 +175,52 @@ export const analyzeMarketAndSave = onSchedule({
       return;
     }
 
-    const prefSignalsData = allPrefSignals.docs.map(doc => doc.data());
+    const prefSignalsDataFull = allPrefSignals.docs.map(doc => doc.data());
     const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
 
-    const sorted = prefSignalsData
-      .filter(s => {
-        const lastUpdate = s.updatedAt?.toMillis ? s.updatedAt.toMillis() : 0;
-        return s.rawHistory && s.rawHistory.length > 0 && !s.isDead && lastUpdate > tenMinutesAgo;
-      })
-      .sort((a, b) => getScore(b.rawHistory) - getScore(a.rawHistory));
+    const prefSignalsData = prefSignalsDataFull.filter(s => {
+      const lastUpdate = s.updatedAt?.toMillis ? s.updatedAt.toMillis() : 0;
+      return s.rawHistory && s.rawHistory.length > 0 && !s.isDead && lastUpdate > tenMinutesAgo;
+    });
 
-    const top1 = sorted[0];
-    if (!top1) {
-      console.log("Nenhum sinal M5 com histórico disponível.");
+    const simRef = db.collection("stats").doc("global_simulator");
+
+    if (prefSignalsData.length === 0) {
+      console.log(`[INFO] Nenhum sinal M${prefTF} recente. Limpando monitor.`);
+      await simRef.set({
+        currentPair: null,
+        currentPattern: null,
+        currentDirection: null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
       return;
     }
+
+    const sorted = prefSignalsData.sort((a, b) => getScore(b.rawHistory) - getScore(a.rawHistory));
+    const top1 = sorted[0];
 
     // Último trade catalogado pelo runCataloger
     const lastEntry: TradeResult = top1.rawHistory[top1.rawHistory.length - 1];
 
     // Documento persistente do simulador
-    const simRef = db.collection("stats").doc("global_simulator");
     const simSnap = await simRef.get();
     const simData = simSnap.exists
       ? simSnap.data()!
       : { bankroll: 5000, lastProcessedTime: 0, trades: [] };
 
     const lastProcessedTime: number = simData.lastProcessedTime ?? 0;
+
+    // Se o último trade do Top 1 for muito antigo (mais de 1 hora), 
+    // significa que não há operações novas. Limpamos o status atual.
+    if (Date.now() - lastEntry.time > 60 * 60 * 1000) {
+      await simRef.set({
+        currentPair: null,
+        currentPattern: null,
+        currentDirection: null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+      return;
+    }
 
     // ── Verificação de trade novo ──────────────────────────────────────────
     // `lastEntry.time` é o openTime da vela de entrada.
