@@ -38,12 +38,12 @@ const M5_STRATEGIES = [
 const M1_STRATEGIES = [
   // Tendência pura: lê a última vela M1 livre (sem agrupamento necessário)
   { name: 'Tendência M1',   func: analyzeM1Trend,        entryIndex: 0 },
-  { name: 'MHI 1',          func: analyzeMHI1,           entryIndex: 0 },
-  { name: 'MHI 2',          func: analyzeMHI2,           entryIndex: 1 },
-  { name: 'MHI 3',          func: analyzeMHI3,           entryIndex: 2 },
-  { name: 'MHI Maioria',    func: analyzeMHIMaioria,     entryIndex: 0 },
-  { name: 'Padrão 23',      func: analyzePadrao23M1,     entryIndex: 0 },
-  { name: 'Torres Gêmeas',  func: analyzeTorresGemeasM1, entryIndex: 0 },
+  { name: 'MHI 1 (M1)',     func: analyzeMHI1,           entryIndex: 0 },
+  { name: 'MHI 2 (M1)',     func: analyzeMHI2,           entryIndex: 1 },
+  { name: 'MHI 3 (M1)',     func: analyzeMHI3,           entryIndex: 2 },
+  { name: 'MHI Maioria (M1)', func: analyzeMHIMaioria,     entryIndex: 0 },
+  { name: 'Padrão 23 (M1)',   func: analyzePadrao23M1,     entryIndex: 0 },
+  { name: 'Torres Gêmeas (M1)', func: analyzeTorresGemeasM1, entryIndex: 0 },
 ];
 
 // ============================================================================
@@ -128,42 +128,45 @@ export const analyzeMarketAndSave = onSchedule({
         if (candles.length < 700) continue;
 
         const currentStrategies = tf === 1 ? M1_STRATEGIES : M5_STRATEGIES;
-        const isDead = isDeadChart(candles);
+        
+        // M1 costuma ter menos variação de preço, afrouxamos o threshold para não marcar como morto à toa
+        const isDead = isDeadChart(candles, tf === 1 ? 40 : 20, tf === 1 ? 8 : 15);
 
         if (isDead) {
-          console.log(`[DEAD] ${pair} - Limpando sinais por baixa liquidez.`);
+          console.log(`[DEAD] ${pair} M${tf} - Baixa liquidez detectada.`);
         }
 
-        // Ambos os timeframes usam blocos de 5 velas:
-        //   M5 → blocos de 5 × 5min = 25 minutos (quadrante padrão)
-        //   M1 → blocos de 5 × 1min = 5 minutos (janela de análise equivalente)
+        // Ambos os timeframes usam blocos de 5 velas
         const blocks = groupInBlocks(candles, 5);
 
         for (const strategy of currentStrategies) {
-          const docId = `${pair}_${strategy.name.replace(/\s+/g, '')}_M${tf}`;
+          const docId = `${pair}_${strategy.name.replace(/\s+/g, '').replace(/[()]/g, '')}_M${tf}`;
 
-          if (isDead) {
-            // Se o gráfico está morto, limpamos o histórico para ele sair do ranking
+          try {
+            if (isDead) {
+              await db.collection("signals").doc(docId).set({
+                rawHistory: [],
+                isDead: true,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+              }, { merge: true });
+              continue;
+            }
+
+            const rawHistory = runCataloger(blocks, strategy.func, strategy.entryIndex);
+            const filteredHistory = rawHistory.slice(-100);
+
             await db.collection("signals").doc(docId).set({
-              rawHistory: [],
-              isDead: true,
+              id: docId,
+              pair,
+              pattern: strategy.name,
+              timeframe: tf,
+              rawHistory: filteredHistory,
+              isDead: false,
               updatedAt: admin.firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
-            continue;
+            });
+          } catch (stratError) {
+            console.error(`Erro na estratégia ${strategy.name} para ${pair} M${tf}:`, stratError);
           }
-
-          const rawHistory = runCataloger(blocks, strategy.func, strategy.entryIndex);
-          const filteredHistory = rawHistory.slice(-100);
-
-          await db.collection("signals").doc(docId).set({
-            id: docId,
-            pair,
-            pattern: strategy.name,
-            timeframe: tf,
-            rawHistory: filteredHistory,
-            isDead: false,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-          });
         }
       } catch (error) {
         console.error(`Erro ao processar ${pair} M${tf}:`, error);

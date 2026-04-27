@@ -146,6 +146,9 @@ export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistor
   const [showDetails, setShowDetails] = React.useState(false);
 
   const getPatternDescription = (name: string) => {
+    // Normaliza o nome para o lookup (remove (M1) se houver)
+    const normalizedName = name.replace(/\s+\(M1\)$/, '');
+    
     const descriptions: Record<string, { desc: string, logic: string, candles: string[] }> = {
       'MHI 1': {
         desc: t.mhi1Desc,
@@ -173,7 +176,7 @@ export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistor
         candles: ['bg-green-500', 'bg-green-500']
       }
     };
-    return descriptions[name] || descriptions['MHI 1'];
+    return descriptions[normalizedName] || descriptions['MHI 1'];
   };
 
   const patternInfo = getPatternDescription(pattern);
