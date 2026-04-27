@@ -50,18 +50,16 @@ const M1_STRATEGIES = [
 // APOSTAS — escala Mão Fixa / Gale 1 / Gale 2
 // ============================================================================
 const PAYOUT = 0.89;
-const BET_SEQUENCE = [1, 2, 4]; // MF, G1, G2
 
-const calcBetProfit = (betIndex: number, isGain: boolean): number => {
-  const bet = BET_SEQUENCE[betIndex];
-  if (isGain) return parseFloat((bet * PAYOUT).toFixed(2));
-  return -bet;
+const calcBetProfit = (betAmount: number, isGain: boolean): number => {
+  if (isGain) return parseFloat((betAmount * PAYOUT).toFixed(2));
+  return -betAmount;
 };
 
 // ============================================================================
 // SCORE DE RANKING — TrendScore (últimas 10) + WinRate (últimas 100)
 // ============================================================================
-const getScore = (history: TradeResult[]): number => {
+const getScore = (history: TradeResult[], dojiRate: number = 0): number => {
   if (!history || history.length === 0) return -9999;
   const recent = history.slice(-100);
   let wins = 0;
@@ -76,7 +74,9 @@ const getScore = (history: TradeResult[]): number => {
   });
 
   const winRate = wins / recent.length;
-  return (trendScore * 10) + winRate * 100;
+  // Penalidade pesada para Dojis: subtrai 2 pontos para cada 1% de Doji
+  const liquidityPenalty = dojiRate * 2;
+  return (trendScore * 10) + (winRate * 100) - liquidityPenalty;
 };
 
 // ============================================================================
@@ -103,9 +103,11 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
   const simSnap = await simRef.get();
   const simData = simSnap.exists
     ? simSnap.data()!
-    : { phase: 'IDLE', bankroll: 5000, trades: [], lastCycleId: null };
+    : { phase: 'IDLE', bankroll: 5000, trades: [], lastCycleId: null, currentBet: 1, maxBet: 1 };
 
   const phase: string = simData.phase || 'IDLE';
+  const currentBet: number = simData.currentBet ?? 1;
+  const maxBet: number = simData.maxBet ?? 1;
   const interval = prefTF === 1 ? '1m' : '5m';
   const candleIntervalMs = prefTF * 60 * 1000;
 
@@ -119,8 +121,21 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
       console.log('[SIM] Nenhum sinal ativo disponível.');
       return;
     }
-    const sorted = liveSignals.sort((a, b) => getScore(b.rawHistory) - getScore(a.rawHistory));
-    const topCandidates = sorted.slice(0, 3); // Tenta os 3 melhores
+    // Pre-calcula scores incluindo liquidez
+    const signalsWithLiquidity = await Promise.all(liveSignals.map(async s => {
+      const candles = await fetchCandles(s.pair, interval, 100);
+      const dojis = candles.filter(c => c.color === 'DOJI').length;
+      const dojiRate = (dojis / (candles.length || 1)) * 100;
+      return { 
+        ...s, 
+        dojiRate, 
+        candles, // Cache para uso posterior
+        score: getScore(s.rawHistory, dojiRate) 
+      };
+    }));
+
+    const sorted = signalsWithLiquidity.sort((a, b) => b.score - a.score);
+    const topCandidates = sorted.slice(0, 5); 
 
     let bestCandidate: any = null;
     let bestSignal: string | null = null;
@@ -133,7 +148,7 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
       const strategy = strategies.find(s => s.name === cand.pattern);
       if (!strategy) continue;
 
-      const candles = await fetchCandles(cand.pair, interval, 30);
+      const candles = cand.candles; // Usa o cache
       if (candles.length < 6) continue;
 
       const blocks = groupInBlocks(candles, 5);
@@ -148,7 +163,7 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
         bestSignal = signal;
         bestStrategy = strategy;
         bestAnalysisBlock = analysisBlock;
-        break; // Encontrou um sinal válido!
+        break; 
       }
     }
 
@@ -208,8 +223,10 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
     const direction: 'CALL' | 'PUT' = simData.currentDirection;
     const isGain = (direction === 'CALL' && entryCandle.color === 'GREEN') ||
                    (direction === 'PUT'  && entryCandle.color === 'RED');
-    const profit = calcBetProfit(0, isGain);
+    const profit = calcBetProfit(currentBet, isGain);
     const newBankroll = parseFloat((simData.bankroll + profit).toFixed(2));
+    const nextBet = isGain ? Math.max(1, currentBet - 0.5) : currentBet + 0.5;
+    const newMaxBet = Math.max(maxBet, currentBet, nextBet);
 
     const tradeEntry = {
       id: `${simData.lastCycleId}_MF`,
@@ -232,6 +249,8 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
       await simRef.set({
         phase: 'IDLE',
         bankroll: newBankroll,
+        currentBet: nextBet,
+        maxBet: newMaxBet,
         trades: updatedTrades,
         statusMessage: `GAIN em Mão Fixa! +$${profit.toFixed(2)}`,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -243,6 +262,8 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
         phase: 'GALE1',
         galeCandleOpenTime: gale1OpenTime,
         bankroll: newBankroll,
+        currentBet: nextBet,
+        maxBet: newMaxBet,
         trades: updatedTrades,
         statusMessage: `LOSS em Mão Fixa. Entrando GALE 1 (${g1TimeStr})`,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -264,8 +285,10 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
     const direction: 'CALL' | 'PUT' = simData.currentDirection;
     const isGain = (direction === 'CALL' && galeCandle.color === 'GREEN') ||
                    (direction === 'PUT'  && galeCandle.color === 'RED');
-    const profit = calcBetProfit(1, isGain);
+    const profit = calcBetProfit(currentBet, isGain);
     const newBankroll = parseFloat((simData.bankroll + profit).toFixed(2));
+    const nextBet = isGain ? Math.max(1, currentBet - 0.5) : currentBet + 0.5;
+    const newMaxBet = Math.max(maxBet, currentBet, nextBet);
 
     const tradeEntry = {
       id: `${simData.lastCycleId}_G1`,
@@ -288,6 +311,8 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
       await simRef.set({
         phase: 'IDLE',
         bankroll: newBankroll,
+        currentBet: nextBet,
+        maxBet: newMaxBet,
         trades: updatedTrades,
         statusMessage: `GAIN em Gale 1! +$${profit.toFixed(2)}`,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -299,6 +324,8 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
         phase: 'GALE2',
         galeCandleOpenTime: gale2OpenTime,
         bankroll: newBankroll,
+        currentBet: nextBet,
+        maxBet: newMaxBet,
         trades: updatedTrades,
         statusMessage: `LOSS em Gale 1. Entrando GALE 2 (${g2TimeStr})`,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -320,8 +347,10 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
     const direction: 'CALL' | 'PUT' = simData.currentDirection;
     const isGain = (direction === 'CALL' && galeCandle.color === 'GREEN') ||
                    (direction === 'PUT'  && galeCandle.color === 'RED');
-    const profit = calcBetProfit(2, isGain);
+    const profit = calcBetProfit(currentBet, isGain);
     const newBankroll = parseFloat((simData.bankroll + profit).toFixed(2));
+    const nextBet = isGain ? Math.max(1, currentBet - 0.5) : currentBet + 0.5;
+    const newMaxBet = Math.max(maxBet, currentBet, nextBet);
 
     const tradeEntry = {
       id: `${simData.lastCycleId}_G2`,
@@ -344,6 +373,8 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
     await simRef.set({
       phase: 'IDLE',
       bankroll: newBankroll,
+      currentBet: nextBet,
+      maxBet: newMaxBet,
       trades: updatedTrades,
       statusMessage: finalMsg,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()

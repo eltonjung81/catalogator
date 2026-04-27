@@ -29,6 +29,8 @@ interface SimData {
   galeCandleOpenTime?: number;
   statusMessage?: string;
   updatedAt?: any;
+  currentBet?: number;
+  maxBet?: number;
 }
 
 interface TradeSimulatorProps {
@@ -42,6 +44,7 @@ const T = {
     title: 'Monitor de Alta Performance',
     bankrollLabel: 'Banca Atual (Real)',
     profitLabel: 'Lucro Acumulado',
+    maxBetLabel: 'Maior Aposta',
     timeLabel: 'Tempo de Operação',
     daysLabel: 'Dias',
     historyTitle: 'Histórico de Operações',
@@ -57,6 +60,7 @@ const T = {
     title: 'High Performance Monitor',
     bankrollLabel: 'Current Bankroll',
     profitLabel: 'Accumulated Profit',
+    maxBetLabel: 'Highest Bet',
     timeLabel: 'Operating Time',
     daysLabel: 'Days',
     historyTitle: 'Trade History',
@@ -123,7 +127,9 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ lang }) => {
         currentDirection: data.currentDirection,
         galeCandleOpenTime: data.galeCandleOpenTime,
         statusMessage: data.statusMessage,
-        updatedAt: data.updatedAt
+        updatedAt: data.updatedAt,
+        currentBet: data.currentBet ?? 1,
+        maxBet: data.maxBet ?? 1
       });
 
       // Flash quando chega novo trade
@@ -166,8 +172,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ lang }) => {
   const direction = simData.currentDirection || '---';
 
   // Banca display: deduz a aposta em aberto
-  const betIndex = simData.phase === 'M_FIXA' ? 0 : simData.phase === 'GALE1' ? 1 : simData.phase === 'GALE2' ? 2 : -1;
-  const activeBet = betIndex >= 0 ? [1, 2, 4][betIndex] : 0;
+  const activeBet = simData.phase !== 'IDLE' ? (simData.currentBet ?? 1) : 0;
   const displayedBankroll = simData.bankroll - activeBet;
 
   // Lucro acumulado (base de 1350 + sessão atual)
@@ -206,7 +211,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ lang }) => {
     if (simData.phase === 'M_FIXA') {
       return {
         msg: simData.statusMessage || `${t.inProgress} (Mão Fixa): ${pair} → ${direction}`,
-        subMsg: simData.statusMessage ? `${pattern} | -$1.00 ${t.inOpen}` : `${pattern} | -$1.00 ${t.inOpen}`,
+        subMsg: simData.statusMessage ? `${pattern} | -$${activeBet.toFixed(2)} ${t.inOpen}` : `${pattern} | -$${activeBet.toFixed(2)} ${t.inOpen}`,
         bgClass: 'bg-blue-500/10 border-blue-500/30',
         dotClass: 'bg-blue-500 animate-pulse',
         textClass: 'text-blue-300 font-semibold',
@@ -220,7 +225,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ lang }) => {
     if (simData.phase === 'GALE1') {
       return {
         msg: simData.statusMessage || `${t.inProgress} (Gale 1): ${pair} → ${direction}`,
-        subMsg: simData.statusMessage ? `${pattern} | -$2.00 ${t.inOpen}` : `${pattern} | -$2.00 ${t.inOpen}`,
+        subMsg: simData.statusMessage ? `${pattern} | -$${activeBet.toFixed(2)} ${t.inOpen}` : `${pattern} | -$${activeBet.toFixed(2)} ${t.inOpen}`,
         bgClass: 'bg-orange-500/10 border-orange-500/30',
         dotClass: 'bg-orange-500 animate-pulse',
         textClass: 'text-orange-300 font-semibold',
@@ -234,7 +239,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ lang }) => {
     if (simData.phase === 'GALE2') {
       return {
         msg: simData.statusMessage || `${t.inProgress} (Gale 2): ${pair} → ${direction}`,
-        subMsg: simData.statusMessage ? `${pattern} | -$4.00 ${t.inOpen}` : `${pattern} | -$4.00 ${t.inOpen}`,
+        subMsg: simData.statusMessage ? `${pattern} | -$${activeBet.toFixed(2)} ${t.inOpen}` : `${pattern} | -$${activeBet.toFixed(2)} ${t.inOpen}`,
         bgClass: 'bg-red-500/10 border-red-500/30',
         dotClass: 'bg-red-500 animate-pulse',
         textClass: 'text-red-300 font-semibold',
@@ -313,7 +318,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ lang }) => {
           </div>
 
           {/* Cards de Métricas */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-700">
               <p className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">{t.bankrollLabel}</p>
               <p className={`text-xl md:text-2xl font-bold transition-colors duration-300 ${
@@ -330,6 +335,13 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ lang }) => {
               <p className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">{t.profitLabel}</p>
               <p className={`text-xl md:text-2xl font-bold ${totalProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                 {totalProfit >= 0 ? '+' : ''}$ {totalProfit.toFixed(2)}
+              </p>
+            </div>
+
+            <div className="bg-slate-900/80 p-4 rounded-xl border border-slate-700">
+              <p className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">{t.maxBetLabel}</p>
+              <p className="text-xl md:text-2xl font-bold text-amber-400">
+                $ {(simData.maxBet ?? 1).toFixed(2)}
               </p>
             </div>
 
