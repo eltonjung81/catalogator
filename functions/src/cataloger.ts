@@ -97,10 +97,9 @@ export const groupInBlocks = (candles: Candle[], candlesPerBlock: number = 5): C
     }
   }
 
-  // Inclui o bloco final se tiver pelo menos 5 velas (bloco completo ou quase).
-  // A condição === candlesPerBlock era rígida demais e descartava blocos válidos
-  // quando o boundary não era detectado corretamente (ver fix UTC acima).
-  if (currentBlock.length >= 5) {
+  // Inclui o bloco final mesmo que incompleto. Isso é vital para que o simulador
+  // consiga detectar e processar o trade atual assim que a primeira vela dele fechar.
+  if (currentBlock.length > 0) {
     blocks.push(currentBlock);
   }
 
