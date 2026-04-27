@@ -208,6 +208,8 @@ export interface TradeResult {
   result: 0 | 1 | 2 | -1;
   time: number;
   direction: 'CALL' | 'PUT';
+  openPrice: number;
+  closePrice: number;
 }
 
 // ============================================================================
@@ -289,12 +291,16 @@ export const runCataloger = (
     }
 
     // Só adicionamos ao histórico se o trade foi REALMENTE finalizado
-    // (Ou ganhou em algum nível, ou perdeu todos os gales disponíveis)
     if (tradeResult !== null) {
+      // O preço de fechamento é o da vela onde o trade parou (seja vitória ou perda total)
+      const lastCandleInTrade = flat[Math.min(entryFlatIdx + (tradeResult === -1 ? 2 : tradeResult), flat.length - 1)];
+      
       history.push({
         result: tradeResult,
         time: entryCandle.openTime,
-        direction: prediction === 'GREEN' ? 'CALL' : 'PUT'
+        direction: prediction === 'GREEN' ? 'CALL' : 'PUT',
+        openPrice: entryCandle.open,
+        closePrice: lastCandleInTrade.close
       });
     }
   }

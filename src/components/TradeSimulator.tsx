@@ -12,6 +12,8 @@ interface Trade {
   profit: number;
   status: string;
   time: number; // timestamp ms
+  openPrice?: number;
+  closePrice?: number;
 }
 
 interface SimData {
@@ -314,7 +316,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang 
         bgClass: 'bg-blue-500/10 border-blue-500/30',
         dotClass: 'bg-blue-500 animate-pulse',
         textClass: 'text-blue-300 font-semibold',
-        icon: <TrendingUp size={32} className="text-blue-400/50" />
+        icon: direction === 'CALL' ? <TrendingUp size={32} className="text-blue-400/50" /> : <TrendingDown size={32} className="text-red-400/50" />
       };
     }
 
@@ -595,6 +597,12 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang 
                       <span className="text-slate-600 font-mono text-[9px]">
                         {new Date(trade.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
+                      {trade.openPrice && trade.closePrice && (
+                        <div className="flex gap-2 ml-1 text-slate-500 font-mono">
+                          <span>O: {trade.openPrice.toFixed(1)}</span>
+                          <span>C: {trade.closePrice.toFixed(1)}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );

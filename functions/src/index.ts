@@ -120,59 +120,64 @@ export const analyzeMarketAndSave = onSchedule({
   // ============================================================
   // FASE 1: Catalogar todos os pares e salvar sinais no Firestore
   // ============================================================
+  const catalogingTasks: Promise<void>[] = [];
+
   for (const pair of PAIRS) {
     for (const tf of [1, 5]) {
-      try {
-        const interval = tf === 1 ? '1m' : '5m';
-        const candles = await fetchCandles(pair, interval, 720);
-        if (candles.length < 700) continue;
+      catalogingTasks.push((async () => {
+        try {
+          const interval = tf === 1 ? '1m' : '5m';
+          const candles = await fetchCandles(pair, interval, 720);
+          if (candles.length < 700) return;
 
-        const currentStrategies = tf === 1 ? M1_STRATEGIES : M5_STRATEGIES;
-        
-        // M1 costuma ter menos variação de preço, afrouxamos o threshold para não marcar como morto à toa
-        const isDead = isDeadChart(candles, tf === 1 ? 40 : 20, tf === 1 ? 8 : 15);
+          const currentStrategies = tf === 1 ? M1_STRATEGIES : M5_STRATEGIES;
+          
+          const isDead = isDeadChart(candles, tf === 1 ? 40 : 20, tf === 1 ? 8 : 15);
 
-        if (isDead) {
-          console.log(`[DEAD] ${pair} M${tf} - Baixa liquidez detectada.`);
-        }
-
-        // Ambos os timeframes usam blocos de 5 velas
-        const blocks = groupInBlocks(candles, 5);
-
-        for (const strategy of currentStrategies) {
-          const docId = `${pair}_${strategy.name.replace(/\s+/g, '').replace(/[()]/g, '')}_M${tf}`;
-
-          try {
-            if (isDead) {
-              await db.collection("signals").doc(docId).set({
-                rawHistory: [],
-                isDead: true,
-                updatedAt: admin.firestore.FieldValue.serverTimestamp()
-              }, { merge: true });
-              continue;
-            }
-
-            const rawHistory = runCataloger(blocks, strategy.func, strategy.entryIndex);
-            const filteredHistory = rawHistory.slice(-100);
-
-            await db.collection("signals").doc(docId).set({
-              id: docId,
-              pair,
-              pattern: strategy.name,
-              timeframe: tf,
-              rawHistory: filteredHistory,
-              isDead: false,
-              updatedAt: admin.firestore.FieldValue.serverTimestamp()
-            });
-          } catch (stratError) {
-            console.error(`Erro na estratégia ${strategy.name} para ${pair} M${tf}:`, stratError);
+          if (isDead) {
+            console.log(`[DEAD] ${pair} M${tf} - Baixa liquidez detectada.`);
           }
+
+          const blocks = groupInBlocks(candles, 5);
+
+          for (const strategy of currentStrategies) {
+            const docId = `${pair}_${strategy.name.replace(/\s+/g, '').replace(/[()]/g, '')}_M${tf}`;
+
+            try {
+              if (isDead) {
+                await db.collection("signals").doc(docId).set({
+                  rawHistory: [],
+                  isDead: true,
+                  updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+                continue;
+              }
+
+              const rawHistory = runCataloger(blocks, strategy.func, strategy.entryIndex);
+              const filteredHistory = rawHistory.slice(-100);
+
+              await db.collection("signals").doc(docId).set({
+                id: docId,
+                pair,
+                pattern: strategy.name,
+                timeframe: tf,
+                rawHistory: filteredHistory,
+                isDead: false,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+              });
+            } catch (stratError) {
+              console.error(`Erro na estratégia ${strategy.name} para ${pair} M${tf}:`, stratError);
+            }
+          }
+        } catch (error) {
+          console.error(`Erro ao processar ${pair} M${tf}:`, error);
         }
-      } catch (error) {
-        console.error(`Erro ao processar ${pair} M${tf}:`, error);
-      }
+      })());
     }
   }
+
+  // Aguarda todos os pares serem catalogados em paralelo
+  await Promise.all(catalogingTasks);
 
   // ============================================================
   // FASE 2: Simulador Global Persistente (Top 1 de M5)
@@ -262,7 +267,24 @@ export const analyzeMarketAndSave = onSchedule({
       }
     }
 
+    // ─── Direção Atual baseada no SINAL MAIS RECENTE ──────────────────────
+    // Para mostrar a direção CORRETA na tela mesmo antes do trade terminar.
+    const lastFullBlock = activeSignal.rawHistory && activeSignal.rawHistory.length > 0 
+      ? groupInBlocks(await fetchCandles(activeSignal.pair, prefTF === 1 ? '1m' : '5m', 10), 5).pop() 
+      : null;
+    
+    // Fallback se não conseguirmos calcular o sinal agora
     const lastEntry: TradeResult = activeSignal.rawHistory[activeSignal.rawHistory.length - 1];
+    let currentDirection = lastEntry.direction;
+
+    if (lastFullBlock) {
+      const strategies = prefTF === 1 ? M1_STRATEGIES : M5_STRATEGIES;
+      const strategy = strategies.find(s => s.name === activeSignal.pattern);
+      if (strategy) {
+        const signal = strategy.func(lastFullBlock);
+        if (signal) currentDirection = signal === 'GREEN' ? 'CALL' : 'PUT';
+      }
+    }
 
     // Se o último trade do sinal ativo for muito antigo (mais de 1 hora), limpamos o status.
     if (Date.now() - lastEntry.time > 60 * 60 * 1000) {
@@ -301,7 +323,7 @@ export const analyzeMarketAndSave = onSchedule({
         lastProcessedTime: lastEntry.time,
         currentPair: activeSignal.pair,
         currentPattern: activeSignal.pattern,
-        currentDirection: lastEntry.direction,
+        currentDirection: currentDirection,
         lastTradeId: newTrade.id,
         trades: updatedTrades,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -322,7 +344,7 @@ export const analyzeMarketAndSave = onSchedule({
           await simRef.set({
             currentPair: activeSignal.pair,
             currentPattern: activeSignal.pattern,
-            currentDirection: lastEntry.direction,
+            currentDirection: currentDirection,
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
           }, { merge: true });
           console.log(`[INFO] Estratégia atualizada: ${activeSignal.pair} (${activeSignal.pattern})`);
