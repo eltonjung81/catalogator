@@ -54,16 +54,28 @@ const findCandleIndex = (flat: Candle[], openTime: number): number => {
   return flat.findIndex(c => c.openTime === openTime);
 };
 
-// Agrupa velas de M1 em blocos de N minutos
-export const groupInBlocks = (candles: Candle[], blockSize: number = 5): Candle[][] => {
+// Agrupa velas em blocos. 
+// Se as velas são M1, blockSize 5 = blocos de 5 min.
+// Se as velas são M5, blockSize 5 = blocos de 25 min.
+export const groupInBlocks = (candles: Candle[], candlesPerBlock: number = 5): Candle[][] => {
+  if (candles.length === 0) return [];
+  
+  // Detecta o intervalo entre as velas (em minutos)
+  const firstInterval = candles.length > 1 ? (candles[1].openTime - candles[0].openTime) : 60000;
+  const candleIntervalMin = Math.round(firstInterval / 60000);
+  
+  // O tamanho do bloco em minutos é (velas por bloco * tempo de cada vela)
+  const blockSizeMinutes = candlesPerBlock * candleIntervalMin;
+
   const blocks: Candle[][] = [];
   let currentBlock: Candle[] = [];
 
   for (const candle of candles) {
     const date = new Date(candle.openTime);
-    const minute = date.getMinutes();
+    // Calculamos o minuto total do dia para o módulo funcionar com blocos > 60min
+    const totalMinutes = (date.getHours() * 60) + date.getMinutes();
 
-    if (minute % blockSize === 0 && currentBlock.length > 0) {
+    if (totalMinutes % blockSizeMinutes === 0 && currentBlock.length > 0) {
       blocks.push(currentBlock);
       currentBlock = [];
     }

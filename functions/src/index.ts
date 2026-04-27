@@ -102,7 +102,8 @@ export const analyzeMarketAndSave = onSchedule({
   for (const pair of PAIRS) {
     for (const tf of [1, 5]) {
       try {
-        const candles = await fetchCandles(pair, '1m', 720);
+        const interval = tf === 1 ? '1m' : '5m';
+        const candles = await fetchCandles(pair, interval, 720);
         if (candles.length < 700) continue;
 
         const currentStrategies = tf === 1 ? M1_STRATEGIES : M5_STRATEGIES;
@@ -112,6 +113,8 @@ export const analyzeMarketAndSave = onSchedule({
           console.log(`[DEAD] ${pair} - Limpando sinais por baixa liquidez.`);
         }
 
+        // Se tf=1, o bloco tem 1 vela (estratégias de tendência).
+        // Se tf=5, o bloco tem 5 velas (estratégias probabilísticas como MHI).
         const blocks = groupInBlocks(candles, tf);
 
         for (const strategy of currentStrategies) {
@@ -156,24 +159,27 @@ export const analyzeMarketAndSave = onSchedule({
   //   4. Nunca duplica: a trava é o openTime da vela de entrada do trade
   // ============================================================
   try {
-    const allM5Signals = await db.collection("signals")
-      .where("timeframe", "==", 5)
+    // ─── Lógica de Preferência de Timeframe ────────────────────────────────
+    // Busca a configuração do usuário. Se não houver, padrão é M5.
+    const configSnap = await db.collection("stats").doc("config").get();
+    const config = configSnap.exists ? configSnap.data()! : { preferredTimeframe: 5 };
+    const prefTF = config.preferredTimeframe || 5;
+
+    // Busca todos os sinais do timeframe preferido
+    const allPrefSignals = await db.collection("signals")
+      .where("timeframe", "==", prefTF)
       .get();
 
-    if (allM5Signals.empty) {
-      console.log("Nenhum sinal M5 disponível.");
+    if (allPrefSignals.empty) {
+      console.log(`Nenhum sinal M${prefTF} disponível.`);
       return;
     }
 
-    const signalsData = allM5Signals.docs.map(doc => doc.data());
+    const prefSignalsData = allPrefSignals.docs.map(doc => doc.data());
     const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
 
-    const sorted = signalsData
+    const sorted = prefSignalsData
       .filter(s => {
-        // Só considera sinais que:
-        // 1. Tenham histórico
-        // 2. Não estejam marcados como mortos
-        // 3. Tenham sido atualizados nos últimos 10 minutos
         const lastUpdate = s.updatedAt?.toMillis ? s.updatedAt.toMillis() : 0;
         return s.rawHistory && s.rawHistory.length > 0 && !s.isDead && lastUpdate > tenMinutesAgo;
       })

@@ -87,30 +87,46 @@ const simulatorTranslations = {
   }
 };
 
-// Retorna segundos até o próximo múltiplo de 5 minutos
-const getSecondsToNextCycle = (): number => {
+// Retorna segundos até o próximo ciclo (5min para M1, 25min para M5)
+const getSecondsToNextCycle = (prefTF: number): number => {
   const now = new Date();
   const totalSeconds = now.getMinutes() * 60 + now.getSeconds();
-  const cycleSeconds = 5 * 60;
+  const cycleSeconds = (prefTF === 1 ? 5 : 25) * 60;
   return cycleSeconds - (totalSeconds % cycleSeconds);
 };
 
-// Retorna a fase atual dentro do ciclo de 5 minutos
-const getCyclePhase = (): { phase: 'ENTRY' | 'M_FIXA' | 'GALE1' | 'GALE2' | 'IDLE'; cycleMin: number } => {
+// Retorna a fase atual dentro do ciclo
+const getCyclePhase = (prefTF: number): { phase: 'ENTRY' | 'M_FIXA' | 'GALE1' | 'GALE2' | 'IDLE'; cycleMin: number } => {
   const now = new Date();
-  const cycleMin = now.getMinutes() % 5;
-  if (cycleMin === 4) return { phase: 'ENTRY', cycleMin };
-  if (cycleMin === 0) return { phase: 'M_FIXA', cycleMin };
-  if (cycleMin === 1) return { phase: 'GALE1', cycleMin };
-  if (cycleMin === 2) return { phase: 'GALE2', cycleMin };
-  return { phase: 'IDLE', cycleMin };
+  const totalMinutes = now.getMinutes();
+  const cycleMinutes = prefTF === 1 ? 5 : 25;
+  const currentInCycle = totalMinutes % cycleMinutes;
+  
+  const step = prefTF === 1 ? 1 : 5;
+
+  // Em M5 (25min ciclo), a entrada é no minuto 20-24? 
+  // Na verdade, a análise termina no fim do bloco de 25min.
+  // Então a entrada é no 0, G1 no 5, G2 no 10 do PRÓXIMO bloco.
+  
+  if (currentInCycle >= cycleMinutes - (prefTF === 1 ? 1 : 1)) { // Último minuto/período do ciclo
+    return { phase: 'ENTRY', cycleMin: currentInCycle };
+  }
+  
+  if (currentInCycle < step) return { phase: 'M_FIXA', cycleMin: currentInCycle };
+  if (currentInCycle < step * 2) return { phase: 'GALE1', cycleMin: currentInCycle };
+  if (currentInCycle < step * 3) return { phase: 'GALE2', cycleMin: currentInCycle };
+  
+  return { phase: 'IDLE', cycleMin: currentInCycle };
 };
 
-// Calcula o valor total investido até o momento (deducted do saldo)
-const getActiveBet = (phase: 'ENTRY' | 'M_FIXA' | 'GALE1' | 'GALE2' | 'IDLE', secondsToNext: number): number => {
+// Calcula o valor total investido até o momento
+const getActiveBet = (phase: 'ENTRY' | 'M_FIXA' | 'GALE1' | 'GALE2' | 'IDLE', secondsToNext: number, prefTF: number): number => {
+  const stepSeconds = (prefTF === 1 ? 1 : 5) * 60;
+  const buffer = 30; // 30s para o backend processar
+
   if (phase === 'M_FIXA') return 1;
-  if (phase === 'GALE1') return secondsToNext >= 210 ? 1 : 3; // Nos primeiros 30s, aguarda resultado da Mão Fixa
-  if (phase === 'GALE2') return secondsToNext >= 150 ? 3 : 7; // Nos primeiros 30s, aguarda resultado do Gale 1
+  if (phase === 'GALE1') return secondsToNext >= (stepSeconds * 4) + buffer ? 1 : 3; 
+  if (phase === 'GALE2') return secondsToNext >= (stepSeconds * 3) + buffer ? 3 : 7;
   return 0;
 };
 
@@ -203,17 +219,19 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang 
   };
 
   // ─── Valores calculados a partir do relógio interno ─────────────────────
-  const { phase } = getCyclePhase();
-  const secondsToNext = getSecondsToNextCycle();
-  const activeBet = getActiveBet(phase, secondsToNext);
+  const { phase } = getCyclePhase(prefTF);
+  const secondsToNext = getSecondsToNextCycle(prefTF);
+  const activeBet = getActiveBet(phase, secondsToNext, prefTF);
 
-  // Detecta se a última operação já fechou neste ciclo de 5 min
+  // Detecta se a última operação já fechou neste ciclo (5 min ou 25 min)
   const nowMsGlobal = Date.now();
-  const cycleStartMsGlobal = Math.floor(nowMsGlobal / (5 * 60 * 1000)) * (5 * 60 * 1000);
+  const cycleDurationMs = (prefTF === 1 ? 5 : 25) * 60 * 1000;
+  const cycleStartMsGlobal = Math.floor(nowMsGlobal / cycleDurationMs) * cycleDurationMs;
+  
   const lastTradeGlobal = simData.trades.length > 0 ? simData.trades[simData.trades.length - 1] : null;
   // result >= 0 = WIN em algum nível (0=direto, 1=G1, 2=G2); -1 = LOSS total
   const cycleOpClosed = lastTradeGlobal !== null
-    && lastTradeGlobal.time >= cycleStartMsGlobal - 60_000
+    && lastTradeGlobal.time >= cycleStartMsGlobal - (prefTF === 1 ? 60_000 : 300_000)
     && lastTradeGlobal.result >= 0;
 
   // Se operação já fechou com WIN, não deduz aposta (ela foi devolvida + lucro)
@@ -275,9 +293,11 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang 
     if (phase === 'GALE1') {
       // Verifica se a mão fixa deste ciclo já ganhou (result === 0)
       const nowMs = Date.now();
-      const cycleStartMs = Math.floor(nowMs / (5 * 60 * 1000)) * (5 * 60 * 1000);
+      const cycleDuration = (prefTF === 1 ? 5 : 25) * 60 * 1000;
+      const cycleStartMs = Math.floor(nowMs / cycleDuration) * cycleDuration;
       const lastTrade = simData.trades.length > 0 ? simData.trades[simData.trades.length - 1] : null;
-      const inCycle = lastTrade !== null && lastTrade.time >= cycleStartMs - 60_000;
+      const buffer = prefTF === 1 ? 60_000 : 300_000;
+      const inCycle = lastTrade !== null && lastTrade.time >= cycleStartMs - buffer;
 
       if (inCycle && lastTrade!.result === 0) {
         // Mão Fixa ganhou → operação encerrada, NÃO entra em Gale 1
@@ -316,9 +336,11 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang 
     // ── Fase de Gale 2 ───────────────────────────────────────────────────────
     if (phase === 'GALE2') {
       const nowMs = Date.now();
-      const cycleStartMs = Math.floor(nowMs / (5 * 60 * 1000)) * (5 * 60 * 1000);
+      const cycleDuration = (prefTF === 1 ? 5 : 25) * 60 * 1000;
+      const cycleStartMs = Math.floor(nowMs / cycleDuration) * cycleDuration;
       const lastTrade = simData.trades.length > 0 ? simData.trades[simData.trades.length - 1] : null;
-      const inCycle = lastTrade !== null && lastTrade.time >= cycleStartMs - 60_000;
+      const buffer = prefTF === 1 ? 60_000 : 300_000;
+      const inCycle = lastTrade !== null && lastTrade.time >= cycleStartMs - buffer;
 
       if (inCycle && lastTrade!.result >= 0 && lastTrade!.result <= 1) {
         // Ganhou na mão fixa (0) ou no Gale 1 (1) → operação encerrada, NÃO entra em Gale 2
@@ -481,7 +503,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang 
                   phase === 'ENTRY' ? 'bg-amber-500' :
                   phase === 'IDLE' ? 'bg-slate-600' : 'bg-blue-500'
                 }`}
-                style={{ width: `${((300 - secondsToNext) / 300) * 100}%` }}
+                style={{ width: `${(( (prefTF === 1 ? 300 : 1500) - secondsToNext) / (prefTF === 1 ? 300 : 1500)) * 100}%` }}
               />
             </div>
             <span className="text-[10px] text-slate-500 font-mono">{countdownFormatted}</span>
