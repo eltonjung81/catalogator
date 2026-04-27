@@ -109,10 +109,9 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
   const interval = prefTF === 1 ? '1m' : '5m';
   const candleIntervalMs = prefTF * 60 * 1000;
 
-  // ── IDLE: Procura novo sinal ──────────────────────────────────────────────
+  // ── IDLE: Procura novo sinal e seta M_FIXA enquanto vela ainda está aberta ─
   if (phase === 'IDLE') {
 
-    // Seleciona o Top 1 pelo score
     const liveSignals = allSignalsData.filter(s =>
       s.rawHistory && s.rawHistory.length > 0 && !s.isDead
     );
@@ -123,112 +122,103 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
     const sorted = liveSignals.sort((a, b) => getScore(b.rawHistory) - getScore(a.rawHistory));
     const top1 = sorted[0];
 
-    // Busca estratégia correspondente
     const strategies = prefTF === 1 ? M1_STRATEGIES : M5_STRATEGIES;
     const strategy = strategies.find(s => s.name === top1.pattern);
-    if (!strategy) {
-      console.log(`[SIM] Estratégia "${top1.pattern}" não encontrada.`);
-      return;
-    }
+    if (!strategy) return;
 
-    // Busca velas frescas
     const candles = await fetchCandles(top1.pair, interval, 30);
     if (candles.length < 6) return;
 
-    // Agrupa em blocos de 5 — usa APENAS blocos completos para análise
     const blocks = groupInBlocks(candles, 5);
     const completeBlocks = blocks.filter(b => b.length === 5);
-    if (completeBlocks.length === 0) {
-      console.log('[SIM] Nenhum bloco completo ainda.');
-      return;
-    }
+    if (completeBlocks.length === 0) return;
 
-    // Bloco mais recente e completo → é o bloco de análise (como faz o operador manual)
     const analysisBlock = completeBlocks[completeBlocks.length - 1];
-
-    // Corre a função da estratégia EXATAMENTE como o catalogador faz
     const signal = strategy.func(analysisBlock);
     if (!signal) {
       console.log(`[SIM] Sem sinal para ${top1.pair} com ${top1.pattern}.`);
+      // Atualiza display sem mudar de fase
+      await simRef.set({
+        currentPair: top1.pair,
+        currentPattern: top1.pattern,
+        currentDirection: null,
+        phase: 'IDLE',
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
       return;
     }
 
     const direction: 'CALL' | 'PUT' = signal === 'GREEN' ? 'CALL' : 'PUT';
-
-    // A vela de entrada é a primeira vela APÓS o bloco de análise
-    // = a vela com openTime = último openTime do bloco + 1 intervalo
     const lastBlockCandle = analysisBlock[analysisBlock.length - 1];
     const entryCandleOpenTime = lastBlockCandle.openTime + candleIntervalMs + (strategy.entryIndex * candleIntervalMs);
-
-    // Verifica se essa vela já fechou (deve estar no array de candles)
-    const entryCandle = candles.find(c => c.openTime === entryCandleOpenTime);
-    if (!entryCandle) {
-      console.log(`[SIM] Vela de entrada ${new Date(entryCandleOpenTime).toISOString()} ainda não fechou.`);
-      // Apenas registra que estamos aguardando esta vela (display para o usuário)
-      const changed = simData.currentPair !== top1.pair || simData.currentPattern !== top1.pattern;
-      if (changed) {
-        await simRef.set({
-          currentPair: top1.pair,
-          currentPattern: top1.pattern,
-          currentDirection: direction,
-          phase: 'IDLE',
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        }, { merge: true });
-      }
-      return;
-    }
-
-    // Checa se já processamos esse ciclo (evita duplicação)
     const cycleId = `${top1.pair}_${entryCandleOpenTime}`;
+
+    // Já processamos esse ciclo? Sai sem fazer nada.
     if (simData.lastCycleId === cycleId) {
       console.log(`[SIM] Ciclo ${cycleId} já processado.`);
       return;
     }
 
-    // Determina o resultado da Mão Fixa
+    // PASSO CHAVE: seta M_FIXA AGORA, independente de a vela ter fechado.
+    // O resultado será verificado na próxima execução (fase M_FIXA).
+    console.log(`[SIM] Novo sinal: ${top1.pair} ${direction} | Entrada vela ${new Date(entryCandleOpenTime).toISOString()}`);
+    await simRef.set({
+      phase: 'M_FIXA',
+      lastCycleId: cycleId,
+      currentPair: top1.pair,
+      currentPattern: top1.pattern,
+      currentDirection: direction,
+      entryCandleOpenTime,        // vela de Mão Fixa
+      galeCandleOpenTime: null,   // ainda sem gale
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    return;
+  }
+
+  // ── M_FIXA: Aguarda vela de entrada fechar e processa resultado ───────────
+  if (phase === 'M_FIXA') {
+    const candles = await fetchCandles(simData.currentPair, interval, 10);
+    const entryCandle = candles.find((c: Candle) => c.openTime === simData.entryCandleOpenTime);
+
+    if (!entryCandle) {
+      console.log(`[SIM] M_FIXA aguardando vela ${new Date(simData.entryCandleOpenTime).toISOString()}`);
+      return; // Vela ainda aberta — exibe M_FIXA na tela por mais 1 minuto
+    }
+
+    const direction: 'CALL' | 'PUT' = simData.currentDirection;
     const isGain = (direction === 'CALL' && entryCandle.color === 'GREEN') ||
                    (direction === 'PUT'  && entryCandle.color === 'RED');
     const profit = calcBetProfit(0, isGain);
     const newBankroll = parseFloat((simData.bankroll + profit).toFixed(2));
 
     const tradeEntry = {
-      id: `${cycleId}_MF`,
-      pair: top1.pair,
-      pattern: top1.pattern,
+      id: `${simData.lastCycleId}_MF`,
+      pair: simData.currentPair,
+      pattern: simData.currentPattern,
       direction,
       phase: 'Mão Fixa',
       openPrice: entryCandle.open,
       closePrice: entryCandle.close,
       result: isGain ? 'GAIN' : 'LOSS',
       profit,
-      time: entryCandleOpenTime,
+      time: simData.entryCandleOpenTime,
       bankrollAfter: newBankroll
     };
 
     const updatedTrades = [...(simData.trades || []), tradeEntry].slice(-100);
-
-    console.log(`[SIM] Mão Fixa | ${top1.pair} | ${direction} | O:${entryCandle.open} C:${entryCandle.close} | ${isGain ? 'GAIN' : 'LOSS'} | ${profit >= 0 ? '+' : ''}$${profit}`);
+    console.log(`[SIM] Mão Fixa | ${simData.currentPair} | ${direction} | O:${entryCandle.open} C:${entryCandle.close} | ${isGain ? 'GAIN' : 'LOSS'}`);
 
     if (isGain) {
       await simRef.set({
         phase: 'IDLE',
-        lastCycleId: cycleId,
-        currentPair: top1.pair,
-        currentPattern: top1.pattern,
-        currentDirection: direction,
         bankroll: newBankroll,
         trades: updatedTrades,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
     } else {
-      // Gale 1: próxima vela
-      const gale1OpenTime = entryCandleOpenTime + candleIntervalMs;
+      const gale1OpenTime = simData.entryCandleOpenTime + candleIntervalMs;
       await simRef.set({
         phase: 'GALE1',
-        lastCycleId: cycleId,
-        currentPair: top1.pair,
-        currentPattern: top1.pattern,
-        currentDirection: direction,
         galeCandleOpenTime: gale1OpenTime,
         bankroll: newBankroll,
         trades: updatedTrades,
@@ -238,13 +228,13 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
     return;
   }
 
-  // ── GALE 1 ────────────────────────────────────────────────────────────────
+  // ── GALE 1: Aguarda vela fechar e processa ────────────────────────────────
   if (phase === 'GALE1') {
     const candles = await fetchCandles(simData.currentPair, interval, 10);
     const galeCandle = candles.find((c: Candle) => c.openTime === simData.galeCandleOpenTime);
 
     if (!galeCandle) {
-      console.log(`[SIM] Gale 1 aguardando vela ${new Date(simData.galeCandleOpenTime).toISOString()}`);
+      console.log(`[SIM] GALE1 aguardando vela ${new Date(simData.galeCandleOpenTime).toISOString()}`);
       return;
     }
 
@@ -269,8 +259,7 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
     };
 
     const updatedTrades = [...(simData.trades || []), tradeEntry].slice(-100);
-
-    console.log(`[SIM] Gale 1 | ${simData.currentPair} | ${direction} | O:${galeCandle.open} C:${galeCandle.close} | ${isGain ? 'GAIN' : 'LOSS'} | ${profit >= 0 ? '+' : ''}$${profit}`);
+    console.log(`[SIM] Gale 1 | ${simData.currentPair} | ${direction} | ${isGain ? 'GAIN' : 'LOSS'}`);
 
     if (isGain) {
       await simRef.set({
@@ -292,13 +281,13 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
     return;
   }
 
-  // ── GALE 2 ────────────────────────────────────────────────────────────────
+  // ── GALE 2: Aguarda vela fechar e processa (último gale) ──────────────────
   if (phase === 'GALE2') {
     const candles = await fetchCandles(simData.currentPair, interval, 10);
     const galeCandle = candles.find((c: Candle) => c.openTime === simData.galeCandleOpenTime);
 
     if (!galeCandle) {
-      console.log(`[SIM] Gale 2 aguardando vela ${new Date(simData.galeCandleOpenTime).toISOString()}`);
+      console.log(`[SIM] GALE2 aguardando vela ${new Date(simData.galeCandleOpenTime).toISOString()}`);
       return;
     }
 
@@ -323,10 +312,9 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
     };
 
     const updatedTrades = [...(simData.trades || []), tradeEntry].slice(-100);
+    console.log(`[SIM] Gale 2 | ${simData.currentPair} | ${direction} | ${isGain ? 'GAIN' : 'LOSS'}`);
 
-    console.log(`[SIM] Gale 2 | ${simData.currentPair} | ${direction} | O:${galeCandle.open} C:${galeCandle.close} | ${isGain ? 'GAIN' : 'LOSS'} | ${profit >= 0 ? '+' : ''}$${profit}`);
-
-    // Após Gale 2 sempre volta a IDLE (máximo de 2 gales)
+    // Após Gale 2 sempre volta a IDLE
     await simRef.set({
       phase: 'IDLE',
       bankroll: newBankroll,
