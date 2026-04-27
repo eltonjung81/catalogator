@@ -15,7 +15,7 @@ export const fetchCandles = async (symbol: string, interval: string = '1m', limi
   try {
     const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
     const response = await axios.get(url);
-    
+
     const now = Date.now();
     const buffer = 2000; // 2 segundos de buffer para garantir que a vela fechou na API
     return response.data
@@ -59,11 +59,11 @@ const findCandleIndex = (flat: Candle[], openTime: number): number => {
 // Se as velas são M5, blockSize 5 = blocos de 25 min.
 export const groupInBlocks = (candles: Candle[], candlesPerBlock: number = 5): Candle[][] => {
   if (candles.length === 0) return [];
-  
+
   // Detecta o intervalo entre as velas (em minutos)
   const firstInterval = candles.length > 1 ? (candles[1].openTime - candles[0].openTime) : 60000;
   const candleIntervalMin = Math.round(firstInterval / 60000);
-  
+
   // O tamanho do bloco em minutos é (velas por bloco * tempo de cada vela)
   const blockSizeMinutes = candlesPerBlock * candleIntervalMin;
 
@@ -75,7 +75,9 @@ export const groupInBlocks = (candles: Candle[], candlesPerBlock: number = 5): C
 
   for (const candle of candles) {
     const date = new Date(candle.openTime);
-    const totalMinutes = (date.getHours() * 60) + date.getMinutes();
+    // CRÍTICO: usar UTC — os timestamps da Binance são UTC.
+    // getHours()/getMinutes() usa o fuso local do servidor e quebra o boundary.
+    const totalMinutes = (date.getUTCHours() * 60) + date.getUTCMinutes();
     const isOnBoundary = totalMinutes % blockSizeMinutes === 0;
 
     if (isOnBoundary) {
@@ -93,9 +95,11 @@ export const groupInBlocks = (candles: Candle[], candlesPerBlock: number = 5): C
       currentBlock.push(candle);
     }
   }
-  
-  // Só inclui o bloco final se ele estiver completo
-  if (currentBlock.length === candlesPerBlock) {
+
+  // Inclui o bloco final se tiver pelo menos 5 velas (bloco completo ou quase).
+  // A condição === candlesPerBlock era rígida demais e descartava blocos válidos
+  // quando o boundary não era detectado corretamente (ver fix UTC acima).
+  if (currentBlock.length >= 5) {
     blocks.push(currentBlock);
   }
 
@@ -111,7 +115,7 @@ export const analyzeMHI1 = (previousBlock: Candle[]): 'GREEN' | 'RED' | null => 
   const last3 = previousBlock.slice(-3);
   const greens = last3.filter(c => c.color === 'GREEN').length;
   const reds = last3.filter(c => c.color === 'RED').length;
-  
+
   if (greens === 0 && reds === 0) return null;
   return greens < reds ? 'GREEN' : 'RED'; // Minoria
 };
@@ -121,7 +125,7 @@ export const analyzeMHIMaioria = (previousBlock: Candle[]): 'GREEN' | 'RED' | nu
   const last3 = previousBlock.slice(-3);
   const greens = last3.filter(c => c.color === 'GREEN').length;
   const reds = last3.filter(c => c.color === 'RED').length;
-  
+
   if (greens === 0 && reds === 0) return null;
   return greens > reds ? 'GREEN' : 'RED'; // Maioria
 };
@@ -178,7 +182,7 @@ export const analyzePadrao23M1 = (previousBlock: Candle[]): 'GREEN' | 'RED' | nu
   if (votes.length === 0) return null;
 
   const greens = votes.filter(v => v === 'GREEN').length;
-  const reds   = votes.filter(v => v === 'RED').length;
+  const reds = votes.filter(v => v === 'RED').length;
 
   if (greens > reds) return 'GREEN';
   if (reds > greens) return 'RED';
@@ -223,7 +227,7 @@ export const runCataloger = (
   patternAnalyzer: (prevBlock: Candle[]) => 'GREEN' | 'RED' | null,
   entryCandleIndex: number = 0
 ): TradeResult[] => {
-  
+
   const history: TradeResult[] = [];
 
   // Array plano: facilita navegar N velas à frente sem se preocupar com fronteiras de bloco
@@ -250,7 +254,7 @@ export const runCataloger = (
     if (entryFlatIdx === -1) continue;
 
     // Simula até 3 tentativas: entrada + G1 + G2
-    let tradeResult: 0 | 1 | 2 | -1 | null = null; 
+    let tradeResult: 0 | 1 | 2 | -1 | null = null;
 
     for (let attempt = 0; attempt <= 2; attempt++) {
       const candleFlatIdx = entryFlatIdx + attempt;
