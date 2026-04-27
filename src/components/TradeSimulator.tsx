@@ -109,7 +109,9 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ lang }) => {
       if (!snap.exists()) return;
       const data = snap.data();
 
-      const sortedTrades: TradeEntry[] = [...(data.trades || [])].sort((a, b) => a.time - b.time);
+      const sortedTrades: TradeEntry[] = [...(data.trades || [])]
+        .filter((t: any) => typeof t.result === 'string' && typeof t.profit === 'number')
+        .sort((a, b) => a.time - b.time);
 
       setSimData({
         phase: data.phase || 'IDLE',
@@ -417,14 +419,18 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ lang }) => {
 
                     {/* Direita: preços + resultado + horário */}
                     <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
-                      <span className="text-slate-600 font-mono">
-                        O:{fmtPrice(trade.openPrice)}
-                      </span>
-                      <span className="text-slate-600 font-mono">
-                        C:{fmtPrice(trade.closePrice)}
-                      </span>
+                      {trade.openPrice != null && (
+                        <span className="text-slate-600 font-mono">
+                          O:{fmtPrice(trade.openPrice)}
+                        </span>
+                      )}
+                      {trade.closePrice != null && (
+                        <span className="text-slate-600 font-mono">
+                          C:{fmtPrice(trade.closePrice)}
+                        </span>
+                      )}
                       <span className={`font-black ${isGain ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {isGain ? '+' : ''}${trade.profit.toFixed(2)}
+                        {isGain ? '+' : ''}${(trade.profit ?? 0).toFixed(2)}
                       </span>
                       <span className={`px-1.5 py-0.5 rounded font-black text-[9px] ${
                         isGain ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
