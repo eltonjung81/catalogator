@@ -403,7 +403,7 @@ function App() {
 
         {!loadingData && signals.length > 0 && (
           <TradeSimulator
-            topSignal={displaySignals.find(s => s.timeframe === 5) || null}
+            topSignal={displaySignals.find(s => s.timeframe === selectedTimeframe) || displaySignals[0] || null}
             galeLimit={galeLimit}
             lang={lang}
           />
