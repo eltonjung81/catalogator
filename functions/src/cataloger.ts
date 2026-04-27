@@ -17,9 +17,10 @@ export const fetchCandles = async (symbol: string, interval: string = '1m', limi
     const response = await axios.get(url);
 
     const now = Date.now();
-    const buffer = 2000; // 2 segundos de buffer para garantir que a vela fechou na API
+    // Removemos o buffer de 2000ms. data[6] é o closeTime da vela.
+    // Se 'now' > 'closeTime', a vela está matematicamente fechada na Binance.
     return response.data
-      .filter((data: any[]) => (now - buffer) > data[6])
+      .filter((data: any[]) => now > data[6])
       .map((data: any[]) => {
         const open = parseFloat(data[1]);
         const close = parseFloat(data[4]);

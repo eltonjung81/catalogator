@@ -58,7 +58,9 @@ const simulatorTranslations = {
     fixedHand: 'Mão Fixa',
     monitoring: 'Monitorando',
     nextEntry: 'Próxima entrada em',
-    inOpen: 'em aberto'
+    inOpen: 'em aberto',
+    targetCandle: 'Vela Alvo',
+    operatingCandle: 'Vela em Operação'
   },
   en: {
     monitorTitle: 'High Performance Monitor (M5)',
@@ -83,7 +85,9 @@ const simulatorTranslations = {
     fixedHand: 'Fixed Hand',
     monitoring: 'Monitoring',
     nextEntry: 'Next entry in',
-    inOpen: 'in open'
+    inOpen: 'in open',
+    targetCandle: 'Target Candle',
+    operatingCandle: 'Operating Candle'
   }
 };
 
@@ -117,6 +121,30 @@ const getCyclePhase = (prefTF: number): { phase: 'ENTRY' | 'M_FIXA' | 'GALE1' | 
   if (currentInCycle < step * 3) return { phase: 'GALE2', cycleMin: currentInCycle };
   
   return { phase: 'IDLE', cycleMin: currentInCycle };
+};
+
+// Calcula o horário (HH:mm) da vela alvo baseado na fase
+const getTargetCandleTime = (prefTF: number, phase: string): string => {
+  const now = new Date();
+  const cycleMinutes = prefTF === 1 ? 5 : 25;
+  const currentTotalMinutes = now.getHours() * 60 + now.getMinutes();
+  const startOfCurrentCycle = Math.floor(currentTotalMinutes / cycleMinutes) * cycleMinutes;
+  
+  let targetMinutes = startOfCurrentCycle;
+
+  if (phase === 'ENTRY' || phase === 'IDLE') {
+    // Próximo ciclo
+    targetMinutes = startOfCurrentCycle + cycleMinutes;
+  } else {
+    // Ciclo atual, mas depende do Gale
+    const step = prefTF === 1 ? 1 : 5;
+    if (phase === 'GALE1') targetMinutes += step;
+    if (phase === 'GALE2') targetMinutes += step * 2;
+  }
+
+  const h = Math.floor((targetMinutes / 60) % 24);
+  const m = targetMinutes % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 };
 
 // Calcula o valor total investido até o momento
@@ -222,6 +250,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang 
   const { phase } = getCyclePhase(prefTF);
   const secondsToNext = getSecondsToNextCycle(prefTF);
   const activeBet = getActiveBet(phase, secondsToNext, prefTF);
+  const targetTime = getTargetCandleTime(prefTF, phase);
 
   // Detecta se a última operação já fechou neste ciclo (5 min ou 25 min)
   const nowMsGlobal = Date.now();
@@ -270,7 +299,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang 
     if (phase === 'ENTRY') {
       return {
         msg: `${t.patternDetected} ${t.entering} ${lang === 'pt' ? 'em' : 'in'} ${pair} (${pattern})`,
-        subMsg: t.waitingCandle,
+        subMsg: `${t.targetCandle}: ${targetTime} | ${t.waitingCandle}`,
         bgClass: 'bg-amber-500/10 border-amber-500/30',
         dotClass: 'bg-amber-500 animate-ping',
         textClass: 'text-amber-400 animate-pulse font-bold',
@@ -281,7 +310,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang 
     if (phase === 'M_FIXA') {
       return {
         msg: `${t.opInProgress} (${t.fixedHand}): ${pair} → ${direction}`,
-        subMsg: `${pattern} | ${t.waitingResult}`,
+        subMsg: `${pattern} | ${t.operatingCandle}: ${targetTime}`,
         bgClass: 'bg-blue-500/10 border-blue-500/30',
         dotClass: 'bg-blue-500 animate-pulse',
         textClass: 'text-blue-300 font-semibold',
@@ -325,7 +354,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang 
 
       return {
         msg: `${t.opInProgress} (Gale 1): ${pair} → ${direction}`,
-        subMsg: `${pattern} | ${lang === 'pt' ? 'Mão Fixa perdeu — aguardando resultado do Gale 1...' : 'Fixed hand lost — waiting for Gale 1 result...'}`,
+        subMsg: `${t.operatingCandle}: ${targetTime} | ${pattern}`,
         bgClass: 'bg-orange-500/10 border-orange-500/30',
         dotClass: 'bg-orange-500 animate-pulse',
         textClass: 'text-orange-300 font-semibold',
@@ -369,7 +398,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang 
 
       return {
         msg: `${t.opInProgress} (Gale 2): ${pair} → ${direction}`,
-        subMsg: `${pattern} | ${lang === 'pt' ? 'Gale 1 perdeu — aguardando resultado do Gale 2...' : 'Gale 1 lost — waiting for Gale 2 result...'}`,
+        subMsg: `${t.operatingCandle}: ${targetTime} | ${pattern}`,
         bgClass: 'bg-red-500/10 border-red-500/30',
         dotClass: 'bg-red-500 animate-pulse',
         textClass: 'text-red-300 font-semibold',

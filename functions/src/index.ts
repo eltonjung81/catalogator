@@ -232,9 +232,7 @@ export const analyzeMarketAndSave = onSchedule({
 
     const lastProcessedTime: number = simData.lastProcessedTime ?? 0;
 
-    // ─── Lógica de Travamento de Estratégia ────────────────────────────────
-    // Se já existe uma operação em andamento (currentPair não é null),
-    // verificamos se ela já terminou antes de tentar trocar de sinal.
+    // ─── Lógica de Travamento de Estratégia baseada no Ciclo ────────────────
     let activeSignal = top1;
     const isOngoing = simData.currentPair && simData.currentPattern;
 
@@ -245,15 +243,21 @@ export const analyzeMarketAndSave = onSchedule({
       );
 
       if (existingSignal) {
-        // O lock deve durar o tempo máximo de 3 velas (entrada + G1 + G2) no TF em uso.
-        // 3 velas × intervalo do TF garante que todos os gales tenham completado.
-        const candleDurationMs = prefTF * 60 * 1000;
-        const galeLockDuration = 3 * candleDurationMs;
-        const timeSinceStart = Date.now() - lastProcessedTime;
+        const totalMinutes = Math.floor(Date.now() / 60000);
+        const cycleMinutes = prefTF === 1 ? 5 : 25;
+        const minutesInCycle = totalMinutes % cycleMinutes;
+        
+        // O trade usa até 3 velas (Entrada, G1, G2). Damos 1 vela extra de margem 
+        // para o backend processar e confirmar o resultado final.
+        // Total de travamento = 4 velas (M1 = 4 min, M5 = 20 min).
+        // O último período do ciclo é livre para destravar e trocar de sinal.
+        const lockMinutes = prefTF === 1 ? 4 : 20;
 
-        if (timeSinceStart < galeLockDuration) {
-          console.log(`[LOCK] Mantendo ${simData.currentPair} (${simData.currentPattern}) até o fim dos gales.`);
+        if (minutesInCycle < lockMinutes) {
+          console.log(`[LOCK] Ciclo em andamento (minuto ${minutesInCycle}/${cycleMinutes}). Mantendo ${simData.currentPair} (${simData.currentPattern}).`);
           activeSignal = existingSignal;
+        } else {
+          console.log(`[UNLOCK] Fim de ciclo (minuto ${minutesInCycle}/${cycleMinutes}). Liberado para trocar de estratégia.`);
         }
       }
     }
