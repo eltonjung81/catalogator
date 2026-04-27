@@ -199,9 +199,6 @@ export const analyzeMarketAndSave = onSchedule({
     const sorted = prefSignalsData.sort((a, b) => getScore(b.rawHistory) - getScore(a.rawHistory));
     const top1 = sorted[0];
 
-    // Último trade catalogado pelo runCataloger
-    const lastEntry: TradeResult = top1.rawHistory[top1.rawHistory.length - 1];
-
     // Documento persistente do simulador
     const simSnap = await simRef.get();
     const simData = simSnap.exists
@@ -210,8 +207,33 @@ export const analyzeMarketAndSave = onSchedule({
 
     const lastProcessedTime: number = simData.lastProcessedTime ?? 0;
 
-    // Se o último trade do Top 1 for muito antigo (mais de 1 hora), 
-    // significa que não há operações novas. Limpamos o status atual.
+    // ─── Lógica de Travamento de Estratégia ────────────────────────────────
+    // Se já existe uma operação em andamento (currentPair não é null),
+    // verificamos se ela já terminou antes de tentar trocar de sinal.
+    let activeSignal = top1;
+    const isOngoing = simData.currentPair && simData.currentPattern;
+
+    if (isOngoing) {
+      // Tenta encontrar o sinal que já estava sendo operado para manter a consistência
+      const existingSignal = prefSignalsDataFull.find(s =>
+        s.pair === simData.currentPair && s.pattern === simData.currentPattern
+      );
+
+      if (existingSignal) {
+        // Se ainda estamos dentro da janela de tempo dos Gales, mantemos ele.
+        const cycleDuration = (prefTF === 1 ? 5 : 25) * 60 * 1000;
+        const timeSinceStart = Date.now() - lastProcessedTime;
+
+        if (timeSinceStart < cycleDuration) {
+          console.log(`[LOCK] Mantendo ${simData.currentPair} (${simData.currentPattern}) até o fim do ciclo.`);
+          activeSignal = existingSignal;
+        }
+      }
+    }
+
+    const lastEntry: TradeResult = activeSignal.rawHistory[activeSignal.rawHistory.length - 1];
+
+    // Se o último trade do sinal ativo for muito antigo (mais de 1 hora), limpamos o status.
     if (Date.now() - lastEntry.time > 60 * 60 * 1000) {
       await simRef.set({
         currentPair: null,
@@ -223,17 +245,15 @@ export const analyzeMarketAndSave = onSchedule({
     }
 
     // ── Verificação de trade novo ──────────────────────────────────────────
-    // `lastEntry.time` é o openTime da vela de entrada.
-    // Só processamos se esse timestamp ainda não foi processado.
     if (lastEntry.time > lastProcessedTime) {
       const { profit, status } = calcProfit(lastEntry.result);
       const prevBankroll: number = simData.bankroll ?? 5000;
       const newBankroll = parseFloat((prevBankroll + profit).toFixed(2));
 
       const newTrade = {
-        id: `${top1.id}_${lastEntry.time}`,
-        pair: top1.pair,
-        pattern: top1.pattern,
+        id: `${activeSignal.pair}_${lastEntry.time}`,
+        pair: activeSignal.pair,
+        pattern: activeSignal.pattern,
         direction: lastEntry.direction,
         result: lastEntry.result,
         profit,
@@ -247,34 +267,35 @@ export const analyzeMarketAndSave = onSchedule({
 
       await simRef.set({
         bankroll: newBankroll,
-        lastProcessedTime: lastEntry.time,  // ← trava para evitar duplicatas
-        currentPair: top1.pair,
-        currentPattern: top1.pattern,
+        lastProcessedTime: lastEntry.time,
+        currentPair: activeSignal.pair,
+        currentPattern: activeSignal.pattern,
         currentDirection: lastEntry.direction,
+        lastTradeId: newTrade.id,
         trades: updatedTrades,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
 
       console.log(
-        `[TRADE] ${top1.pair} | ${top1.pattern} | ${lastEntry.direction} | ${status} | ` +
+        `[TRADE] ${activeSignal.pair} | ${activeSignal.pattern} | ${lastEntry.direction} | ${status} | ` +
         `${profit >= 0 ? '+' : ''}$${profit.toFixed(2)} | Banca: $${newBankroll}`
       );
     } else {
-      // Nenhum trade novo — apenas atualiza o display se o Top 1 mudou
-      const changed =
-        simData.currentPair !== top1.pair ||
-        simData.currentPattern !== top1.pattern;
+      // Nenhum trade novo — apenas atualiza o display se o Top 1 mudou e não estamos travados
+      if (!isOngoing) {
+        const changed =
+          simData.currentPair !== activeSignal.pair ||
+          simData.currentPattern !== activeSignal.pattern;
 
-      if (changed) {
-        await simRef.set({
-          currentPair: top1.pair,
-          currentPattern: top1.pattern,
-          currentDirection: lastEntry.direction,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        }, { merge: true });
-        console.log(`[INFO] Estratégia atualizada: ${top1.pair} (${top1.pattern})`);
-      } else {
-        console.log(`[INFO] Sem trade novo. Aguardando próximo ciclo M5.`);
+        if (changed) {
+          await simRef.set({
+            currentPair: activeSignal.pair,
+            currentPattern: activeSignal.pattern,
+            currentDirection: lastEntry.direction,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+          console.log(`[INFO] Estratégia atualizada: ${activeSignal.pair} (${activeSignal.pattern})`);
+        }
       }
     }
 
