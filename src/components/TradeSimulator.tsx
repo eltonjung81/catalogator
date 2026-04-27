@@ -496,7 +496,9 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang 
 
           {/* Barra de progresso do ciclo */}
           <div className="mt-3 flex items-center gap-2">
-            <span className="text-[10px] text-slate-600 uppercase font-bold tracking-wider">{t.cycleLabel}</span>
+            <span className="text-[10px] text-slate-600 uppercase font-bold tracking-wider">
+              {prefTF === 1 ? t.cycleLabel.replace('M5', 'M1') : t.cycleLabel}
+            </span>
             <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all duration-1000 ${
