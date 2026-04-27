@@ -14,7 +14,9 @@ import {
   analyzeMHI3,
   analyzeMHIMaioria,
   analyzeTorresGemeas,
+  analyzeTorresGemeasM1,
   analyzePadrao23,
+  analyzePadrao23M1,
   analyzeM1Trend,
   isDeadChart,
   TradeResult
@@ -34,13 +36,18 @@ const M5_STRATEGIES = [
 ];
 
 const M1_STRATEGIES = [
-  { name: 'Tendência M1',  func: analyzeM1Trend,     entryIndex: 0 },
-  { name: 'MHI 1 (M1)',    func: analyzeMHI1,        entryIndex: 0 },
-  { name: 'MHI 2 (M1)',    func: analyzeMHI2,        entryIndex: 1 },
-  { name: 'MHI 3 (M1)',    func: analyzeMHI3,        entryIndex: 2 },
-  { name: 'MHI Maioria',   func: analyzeMHIMaioria,  entryIndex: 0 },
-  { name: 'Padrão 23',     func: analyzePadrao23,    entryIndex: 0 },
-  { name: 'Torres Gêmeas', func: analyzeTorresGemeas, entryIndex: 0 },
+  // Tendência pura: lê a última vela M1 livre (sem agrupamento necessário)
+  { name: 'Tendência M1',   func: analyzeM1Trend,        entryIndex: 0 },
+  // MHI opera sobre blocos de 5 velas M1 (janela de 5 minutos)
+  // A mesma lógica de minoria/maioria do M5, aplicada na janela M1
+  { name: 'MHI 1 (M1)',     func: analyzeMHI1,           entryIndex: 0 },
+  { name: 'MHI 2 (M1)',     func: analyzeMHI2,           entryIndex: 1 },
+  { name: 'MHI 3 (M1)',     func: analyzeMHI3,           entryIndex: 2 },
+  { name: 'MHI Maioria M1', func: analyzeMHIMaioria,     entryIndex: 0 },
+  // Padrão 23 M1: maioria entre a 2ª e 3ª vela do bloco de 5 M1
+  { name: 'Padrão 23 M1',   func: analyzePadrao23M1,     entryIndex: 0 },
+  // Torres Gêmeas M1: as 2 últimas velas do bloco devem ser da mesma cor
+  { name: 'Torres Gêmeas M1', func: analyzeTorresGemeasM1, entryIndex: 0 },
 ];
 
 // ============================================================================
@@ -131,10 +138,10 @@ export const analyzeMarketAndSave = onSchedule({
           console.log(`[DEAD] ${pair} - Limpando sinais por baixa liquidez.`);
         }
 
-        // Para M1: estratégias de tendência usam bloco de 1 vela.
-        // Estratégias tipo MHI precisam de bloco de 5 velas M1 (= janela de 5 minutos em M1).
-        // Usamos bloco de 5 para M1 também, garantindo que analyzeMHI* receba prevBlock.length >= 5.
-        const blocks = groupInBlocks(candles, tf === 1 ? 5 : 5);
+        // Ambos os timeframes usam blocos de 5 velas:
+        //   M5 → blocos de 5 × 5min = 25 minutos (quadrante padrão)
+        //   M1 → blocos de 5 × 1min = 5 minutos (janela de análise equivalente)
+        const blocks = groupInBlocks(candles, 5);
 
         for (const strategy of currentStrategies) {
           const docId = `${pair}_${strategy.name.replace(/\s+/g, '')}_M${tf}`;

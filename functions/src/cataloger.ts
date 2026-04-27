@@ -135,16 +135,54 @@ export const analyzeMHIMaioria = (previousBlock: Candle[]): 'GREEN' | 'RED' | nu
 export const analyzeMHI2 = analyzeMHI1;
 export const analyzeMHI3 = analyzeMHI1;
 
+// Torres Gêmeas M5: lê a ÚLTIMA vela do bloco anterior.
+// Sinal = a cor dessa vela (aposta que o próximo bloco abre na mesma direção).
 export const analyzeTorresGemeas = (previousBlock: Candle[]): 'GREEN' | 'RED' | null => {
   if (previousBlock.length < 5) return null;
   const lastCandle = previousBlock[previousBlock.length - 1];
   return lastCandle.color !== 'DOJI' ? lastCandle.color : null;
 };
 
+// Torres Gêmeas M1: exige que as 2 ÚLTIMAS velas do bloco sejam da mesma cor.
+// Isso captura o conceito de "gêmeas de verdade" — duas velas consecutivas confirmando direção.
+// Retorna null se as duas são diferentes ou se alguma é DOJI.
+export const analyzeTorresGemeasM1 = (previousBlock: Candle[]): 'GREEN' | 'RED' | null => {
+  if (previousBlock.length < 5) return null;
+  const last = previousBlock[previousBlock.length - 1];
+  const secondLast = previousBlock[previousBlock.length - 2];
+  if (last.color === 'DOJI' || secondLast.color === 'DOJI') return null;
+  if (last.color !== secondLast.color) return null;
+  return last.color;
+};
+
+// Padrão 23 M5: lê a 2ª vela do bloco (índice 1) — referência temporal dentro do quadrante de 25min.
 export const analyzePadrao23 = (previousBlock: Candle[]): 'GREEN' | 'RED' | null => {
   if (previousBlock.length < 5) return null;
   const candle2 = previousBlock[1];
   return candle2.color !== 'DOJI' ? candle2.color : null;
+};
+
+// Padrão 23 M1: usa a MAIORIA entre a 2ª e a 3ª vela do bloco de 5 M1.
+// Se as duas concordam → sinal na direção delas.
+// Se discordam → null (sem sinal, empate).
+// Se alguma é DOJI → não conta para o placar (ignora ela).
+export const analyzePadrao23M1 = (previousBlock: Candle[]): 'GREEN' | 'RED' | null => {
+  if (previousBlock.length < 5) return null;
+  const candle2 = previousBlock[1];
+  const candle3 = previousBlock[2];
+
+  const votes: Array<'GREEN' | 'RED'> = [];
+  if (candle2.color !== 'DOJI') votes.push(candle2.color);
+  if (candle3.color !== 'DOJI') votes.push(candle3.color);
+
+  if (votes.length === 0) return null;
+
+  const greens = votes.filter(v => v === 'GREEN').length;
+  const reds   = votes.filter(v => v === 'RED').length;
+
+  if (greens > reds) return 'GREEN';
+  if (reds > greens) return 'RED';
+  return null; // empate (1 GREEN + 1 RED) → sem sinal
 };
 
 export const analyzeM1Trend = (candles: Candle[]): 'GREEN' | 'RED' | null => {
