@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Wallet, TrendingUp, TrendingDown, Zap, Clock, ArrowUp, ArrowDown } from 'lucide-react';
 import { db } from '../lib/firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 
 interface Trade {
   id: string;
@@ -138,7 +138,6 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang 
       if (!docSnap.exists()) return;
       const data = docSnap.data();
 
-      // Ordena os trades do mais antigo para o mais novo (ascending por time)
       const sortedTrades: Trade[] = [...(data.trades || [])].sort((a, b) => a.time - b.time);
 
       setSimData({
@@ -175,15 +174,33 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang 
         }
       }
 
-      // Registra sempre (inclusive na primeira carga)
       lastTradeIdRef.current = newLastTradeId ?? null;
+    });
+
+    // Listener para a configuração de timeframe preferido
+    const unsubConfig = onSnapshot(doc(db, "stats", "config"), (docSnap) => {
+      if (docSnap.exists()) {
+        setPrefTF(docSnap.data().preferredTimeframe || 5);
+      }
     });
 
     return () => {
       unsub();
+      unsubConfig();
       if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
     };
   }, []);
+
+  const [prefTF, setPrefTF] = useState<number>(5);
+
+  const toggleTimeframe = async (tf: number) => {
+    try {
+      await setDoc(doc(db, "stats", "config"), { preferredTimeframe: tf }, { merge: true });
+      setPrefTF(tf);
+    } catch (err) {
+      console.error("Erro ao mudar timeframe:", err);
+    }
+  };
 
   // ─── Valores calculados a partir do relógio interno ─────────────────────
   const { phase } = getCyclePhase();
@@ -376,9 +393,28 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ topSignal, lang 
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2 text-blue-400">
               <Wallet size={20} />
-              <h2 className="font-bold uppercase tracking-wider text-sm">{t.monitorTitle}</h2>
+              <h2 className="font-bold uppercase tracking-wider text-sm">
+                {prefTF === 5 ? t.monitorTitle : t.monitorTitle.replace('M5', 'M1')}
+              </h2>
             </div>
-            <div className="flex items-center gap-3">
+            
+            {/* Seletor de Timeframe do Simulador */}
+            <div className="flex bg-slate-900/80 p-1 rounded-lg border border-slate-700 ml-4">
+              <button
+                onClick={() => toggleTimeframe(1)}
+                className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${prefTF === 1 ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                M1
+              </button>
+              <button
+                onClick={() => toggleTimeframe(5)}
+                className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${prefTF === 5 ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                M5
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3 ml-auto">
               {/* Countdown até próxima entrada */}
               <div className="bg-slate-900/60 border border-slate-700 px-3 py-1 rounded-full flex items-center gap-1.5">
                 <Clock size={12} className="text-slate-400" />
