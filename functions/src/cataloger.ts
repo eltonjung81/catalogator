@@ -69,20 +69,33 @@ export const groupInBlocks = (candles: Candle[], candlesPerBlock: number = 5): C
 
   const blocks: Candle[][] = [];
   let currentBlock: Candle[] = [];
+  // Flag para controlar se já encontramos o primeiro boundary correto.
+  // Isso descarta o bloco inicial incompleto que pode começar no meio de um ciclo.
+  let foundFirstBoundary = false;
 
   for (const candle of candles) {
     const date = new Date(candle.openTime);
-    // Calculamos o minuto total do dia para o módulo funcionar com blocos > 60min
     const totalMinutes = (date.getHours() * 60) + date.getMinutes();
+    const isOnBoundary = totalMinutes % blockSizeMinutes === 0;
 
-    if (totalMinutes % blockSizeMinutes === 0 && currentBlock.length > 0) {
-      blocks.push(currentBlock);
-      currentBlock = [];
+    if (isOnBoundary) {
+      if (!foundFirstBoundary) {
+        // Descarta qualquer vela acumulada antes do primeiro boundary real
+        foundFirstBoundary = true;
+        currentBlock = [];
+      } else if (currentBlock.length > 0) {
+        blocks.push(currentBlock);
+        currentBlock = [];
+      }
     }
-    currentBlock.push(candle);
+
+    if (foundFirstBoundary) {
+      currentBlock.push(candle);
+    }
   }
   
-  if (currentBlock.length > 0) {
+  // Só inclui o bloco final se ele estiver completo
+  if (currentBlock.length === candlesPerBlock) {
     blocks.push(currentBlock);
   }
 
@@ -113,10 +126,13 @@ export const analyzeMHIMaioria = (previousBlock: Candle[]): 'GREEN' | 'RED' | nu
   return greens > reds ? 'GREEN' : 'RED'; // Maioria
 };
 
-// MHI 2 e MHI 3 são variações que usam a mesma lógica de minoria, 
-// mas a entrada é feita na 2ª ou 3ª vela do próximo quadrante.
-// No nosso sistema, controlamos isso pelo entryIndex no index.ts.
-export const analyzeMHI2 = analyzeMHI1; 
+// MHI 2 e MHI 3 usam EXATAMENTE a mesma lógica de minoria que MHI 1.
+// A diferença entre elas é APENAS o entryIndex definido em index.ts:
+//   MHI 1 → entrada na vela 0 do próximo bloco
+//   MHI 2 → entrada na vela 1 do próximo bloco
+//   MHI 3 → entrada na vela 2 do próximo bloco
+// Os aliases abaixo existem apenas para clareza semântica no array de estratégias.
+export const analyzeMHI2 = analyzeMHI1;
 export const analyzeMHI3 = analyzeMHI1;
 
 export const analyzeTorresGemeas = (previousBlock: Candle[]): 'GREEN' | 'RED' | null => {
@@ -211,7 +227,11 @@ export const runCataloger = (
       const tradeCandle = flat[candleFlatIdx];
 
       if (tradeCandle.color === 'DOJI') {
-        // DOJI: continua para o próximo gale
+        // DOJI: se ainda há gale disponível, continua para o próximo.
+        // Se este é o último attempt (G2), é LOSS — não há mais chances.
+        if (attempt === 2) {
+          tradeResult = -1;
+        }
         continue;
       }
 
@@ -220,7 +240,7 @@ export const runCataloger = (
         break;
       }
 
-      // Se chegou na última tentativa (G2) e não ganhou: LOSS
+      // Vela adversária na última tentativa (G2): LOSS
       if (attempt === 2) {
         tradeResult = -1;
       }
@@ -244,7 +264,7 @@ export const runCataloger = (
  * Detecta se o gráfico está "morto" (baixa liquidez/volatilidade).
  * Baseia-se na quantidade de DOJIs e na variedade de preços.
  */
-export const isDeadChart = (candles: Candle[], dojiThreshold: number = 30, uniquePriceThreshold: number = 15): boolean => {
+export const isDeadChart = (candles: Candle[], dojiThreshold: number = 20, uniquePriceThreshold: number = 15): boolean => {
   if (candles.length < 60) return false; // Pouco dado, não bloqueia ainda
 
   // Analisamos as últimas 100 velas (ou o que tiver disponível)

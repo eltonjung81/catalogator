@@ -73,8 +73,14 @@ const calcProfit = (result: 0 | 1 | 2 | -1): { profit: number; status: string } 
   const grossWin = winBet * (1 + PAYOUT);
   const netProfit = parseFloat((grossWin - totalSpent).toFixed(2));
 
-  const labels = ['WIN DIRETO', 'WIN GALE 1', 'WIN GALE 2'];
-  return { profit: netProfit, status: labels[result] };
+  // IMPORTANTE: com payout 89% e escala 1-2-4, apenas WIN DIRETO dá lucro real.
+  // WIN G1 = -$1.22 e WIN G2 = -$3.44 (prejuízo líquido apesar de "acertar").
+  // Rotulamos corretamente para não enganar o simulador e o usuário.
+  const labels = result === 0
+    ? 'WIN DIRETO'
+    : `WIN GALE ${result} (prejuízo líquido: $${Math.abs(netProfit).toFixed(2)})`;
+
+  return { profit: netProfit, status: labels };
 };
 
 // ============================================================================
@@ -89,8 +95,10 @@ const getScore = (history: TradeResult[]): number => {
   recent.forEach((r, idx) => {
     const isWin = r.result >= 0; // 0, 1 ou 2 = vitória
     if (isWin) wins++;
+    // Janela de tendência: últimas 10 operações, peso simétrico (+1 win / -1 loss).
+    // O peso assimétrico original (-2 loss) descartava boas estratégias por 1 loss recente.
     if (idx >= recent.length - 10) {
-      trendScore += isWin ? 1 : -2;
+      trendScore += isWin ? 1 : -1;
     }
   });
 
@@ -123,9 +131,10 @@ export const analyzeMarketAndSave = onSchedule({
           console.log(`[DEAD] ${pair} - Limpando sinais por baixa liquidez.`);
         }
 
-        // Se tf=1, o bloco tem 1 vela (estratégias de tendência).
-        // Se tf=5, o bloco tem 5 velas (estratégias probabilísticas como MHI).
-        const blocks = groupInBlocks(candles, tf);
+        // Para M1: estratégias de tendência usam bloco de 1 vela.
+        // Estratégias tipo MHI precisam de bloco de 5 velas M1 (= janela de 5 minutos em M1).
+        // Usamos bloco de 5 para M1 também, garantindo que analyzeMHI* receba prevBlock.length >= 5.
+        const blocks = groupInBlocks(candles, tf === 1 ? 5 : 5);
 
         for (const strategy of currentStrategies) {
           const docId = `${pair}_${strategy.name.replace(/\s+/g, '')}_M${tf}`;
@@ -230,12 +239,14 @@ export const analyzeMarketAndSave = onSchedule({
       );
 
       if (existingSignal) {
-        // Se ainda estamos dentro da janela de tempo dos Gales, mantemos ele.
-        const cycleDuration = (prefTF === 1 ? 5 : 25) * 60 * 1000;
+        // O lock deve durar o tempo máximo de 3 velas (entrada + G1 + G2) no TF em uso.
+        // 3 velas × intervalo do TF garante que todos os gales tenham completado.
+        const candleDurationMs = prefTF * 60 * 1000;
+        const galeLockDuration = 3 * candleDurationMs;
         const timeSinceStart = Date.now() - lastProcessedTime;
 
-        if (timeSinceStart < cycleDuration) {
-          console.log(`[LOCK] Mantendo ${simData.currentPair} (${simData.currentPattern}) até o fim do ciclo.`);
+        if (timeSinceStart < galeLockDuration) {
+          console.log(`[LOCK] Mantendo ${simData.currentPair} (${simData.currentPattern}) até o fim dos gales.`);
           activeSignal = existingSignal;
         }
       }
