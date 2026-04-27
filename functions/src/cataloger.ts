@@ -113,6 +113,12 @@ export const analyzeMHIMaioria = (previousBlock: Candle[]): 'GREEN' | 'RED' | nu
   return greens > reds ? 'GREEN' : 'RED'; // Maioria
 };
 
+// MHI 2 e MHI 3 são variações que usam a mesma lógica de minoria, 
+// mas a entrada é feita na 2ª ou 3ª vela do próximo quadrante.
+// No nosso sistema, controlamos isso pelo entryIndex no index.ts.
+export const analyzeMHI2 = analyzeMHI1; 
+export const analyzeMHI3 = analyzeMHI1;
+
 export const analyzeTorresGemeas = (previousBlock: Candle[]): 'GREEN' | 'RED' | null => {
   if (previousBlock.length < 5) return null;
   const lastCandle = previousBlock[previousBlock.length - 1];
