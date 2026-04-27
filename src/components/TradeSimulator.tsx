@@ -27,6 +27,7 @@ interface SimData {
   currentPattern?: string;
   currentDirection?: 'CALL' | 'PUT';
   galeCandleOpenTime?: number;
+  statusMessage?: string;
   updatedAt?: any;
 }
 
@@ -121,6 +122,7 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ lang }) => {
         currentPattern: data.currentPattern,
         currentDirection: data.currentDirection,
         galeCandleOpenTime: data.galeCandleOpenTime,
+        statusMessage: data.statusMessage,
         updatedAt: data.updatedAt
       });
 
@@ -203,8 +205,8 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ lang }) => {
     // Mão Fixa em andamento
     if (simData.phase === 'M_FIXA') {
       return {
-        msg: `${t.inProgress} (Mão Fixa): ${pair} → ${direction}`,
-        subMsg: `${pattern} | -$1.00 ${t.inOpen}`,
+        msg: simData.statusMessage || `${t.inProgress} (Mão Fixa): ${pair} → ${direction}`,
+        subMsg: simData.statusMessage ? `${pattern} | -$1.00 ${t.inOpen}` : `${pattern} | -$1.00 ${t.inOpen}`,
         bgClass: 'bg-blue-500/10 border-blue-500/30',
         dotClass: 'bg-blue-500 animate-pulse',
         textClass: 'text-blue-300 font-semibold',
@@ -217,8 +219,8 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ lang }) => {
     // Gale 1 em andamento
     if (simData.phase === 'GALE1') {
       return {
-        msg: `${t.inProgress} (Gale 1): ${pair} → ${direction}`,
-        subMsg: `${pattern} | -$2.00 ${t.inOpen}`,
+        msg: simData.statusMessage || `${t.inProgress} (Gale 1): ${pair} → ${direction}`,
+        subMsg: simData.statusMessage ? `${pattern} | -$2.00 ${t.inOpen}` : `${pattern} | -$2.00 ${t.inOpen}`,
         bgClass: 'bg-orange-500/10 border-orange-500/30',
         dotClass: 'bg-orange-500 animate-pulse',
         textClass: 'text-orange-300 font-semibold',
@@ -231,8 +233,8 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ lang }) => {
     // Gale 2 em andamento
     if (simData.phase === 'GALE2') {
       return {
-        msg: `${t.inProgress} (Gale 2): ${pair} → ${direction}`,
-        subMsg: `${pattern} | -$4.00 ${t.inOpen}`,
+        msg: simData.statusMessage || `${t.inProgress} (Gale 2): ${pair} → ${direction}`,
+        subMsg: simData.statusMessage ? `${pattern} | -$4.00 ${t.inOpen}` : `${pattern} | -$4.00 ${t.inOpen}`,
         bgClass: 'bg-red-500/10 border-red-500/30',
         dotClass: 'bg-red-500 animate-pulse',
         textClass: 'text-red-300 font-semibold',
@@ -244,8 +246,8 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ lang }) => {
 
     // IDLE — monitorando
     return {
-      msg: `${t.monitoringNext}: ${pair} (${pattern})`,
-      subMsg: `Próxima entrada em ${countdownFormatted}`,
+      msg: simData.statusMessage || `${t.monitoringNext}: ${pair} (${pattern})`,
+      subMsg: simData.statusMessage ? countdownFormatted : `Próxima entrada em ${countdownFormatted}`,
       bgClass: 'bg-slate-700/30 border-slate-600/30',
       dotClass: 'bg-slate-500',
       textClass: 'text-slate-400',

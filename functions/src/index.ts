@@ -120,38 +120,56 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
       return;
     }
     const sorted = liveSignals.sort((a, b) => getScore(b.rawHistory) - getScore(a.rawHistory));
-    const top1 = sorted[0];
+    const topCandidates = sorted.slice(0, 3); // Tenta os 3 melhores
+
+    let bestCandidate: any = null;
+    let bestSignal: string | null = null;
+    let bestStrategy: any = null;
+    let bestAnalysisBlock: Candle[] = [];
 
     const strategies = prefTF === 1 ? M1_STRATEGIES : M5_STRATEGIES;
-    const strategy = strategies.find(s => s.name === top1.pattern);
-    if (!strategy) return;
 
-    const candles = await fetchCandles(top1.pair, interval, 30);
-    if (candles.length < 6) return;
+    for (const cand of topCandidates) {
+      const strategy = strategies.find(s => s.name === cand.pattern);
+      if (!strategy) continue;
 
-    const blocks = groupInBlocks(candles, 5);
-    const completeBlocks = blocks.filter(b => b.length === 5);
-    if (completeBlocks.length === 0) return;
+      const candles = await fetchCandles(cand.pair, interval, 30);
+      if (candles.length < 6) continue;
 
-    const analysisBlock = completeBlocks[completeBlocks.length - 1];
-    const signal = strategy.func(analysisBlock);
-    if (!signal) {
-      console.log(`[SIM] Sem sinal para ${top1.pair} com ${top1.pattern}.`);
-      // Atualiza display sem mudar de fase
+      const blocks = groupInBlocks(candles, 5);
+      const completeBlocks = blocks.filter(b => b.length === 5);
+      if (completeBlocks.length === 0) continue;
+
+      const analysisBlock = completeBlocks[completeBlocks.length - 1];
+      const signal = strategy.func(analysisBlock);
+      
+      if (signal) {
+        bestCandidate = cand;
+        bestSignal = signal;
+        bestStrategy = strategy;
+        bestAnalysisBlock = analysisBlock;
+        break; // Encontrou um sinal válido!
+      }
+    }
+
+    if (!bestCandidate) {
+      const top1 = topCandidates[0];
+      console.log(`[SIM] Nenhum sinal nos top 3. Monitorando ${top1.pair}.`);
       await simRef.set({
         currentPair: top1.pair,
         currentPattern: top1.pattern,
         currentDirection: null,
         phase: 'IDLE',
+        statusMessage: `Monitorando ${top1.pair}...`,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
       return;
     }
 
-    const direction: 'CALL' | 'PUT' = signal === 'GREEN' ? 'CALL' : 'PUT';
-    const lastBlockCandle = analysisBlock[analysisBlock.length - 1];
-    const entryCandleOpenTime = lastBlockCandle.openTime + candleIntervalMs + (strategy.entryIndex * candleIntervalMs);
-    const cycleId = `${top1.pair}_${entryCandleOpenTime}`;
+    const direction: 'CALL' | 'PUT' = bestSignal === 'GREEN' ? 'CALL' : 'PUT';
+    const lastBlockCandle = bestAnalysisBlock[bestAnalysisBlock.length - 1];
+    const entryCandleOpenTime = lastBlockCandle.openTime + candleIntervalMs + (bestStrategy.entryIndex * candleIntervalMs);
+    const cycleId = `${bestCandidate.pair}_${entryCandleOpenTime}`;
 
     // Já processamos esse ciclo? Sai sem fazer nada.
     if (simData.lastCycleId === cycleId) {
@@ -159,17 +177,19 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
       return;
     }
 
-    // PASSO CHAVE: seta M_FIXA AGORA, independente de a vela ter fechado.
-    // O resultado será verificado na próxima execução (fase M_FIXA).
-    console.log(`[SIM] Novo sinal: ${top1.pair} ${direction} | Entrada vela ${new Date(entryCandleOpenTime).toISOString()}`);
+    const entryTimeStr = new Date(entryCandleOpenTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const statusMsg = `Identificado: Entrando na vela de ${entryTimeStr} (${direction})`;
+
+    console.log(`[SIM] ${statusMsg} para ${bestCandidate.pair}`);
     await simRef.set({
       phase: 'M_FIXA',
       lastCycleId: cycleId,
-      currentPair: top1.pair,
-      currentPattern: top1.pattern,
+      currentPair: bestCandidate.pair,
+      currentPattern: bestCandidate.pattern,
       currentDirection: direction,
-      entryCandleOpenTime,        // vela de Mão Fixa
-      galeCandleOpenTime: null,   // ainda sem gale
+      statusMessage: statusMsg,
+      entryCandleOpenTime,
+      galeCandleOpenTime: null,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
     return;
@@ -213,15 +233,18 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
         phase: 'IDLE',
         bankroll: newBankroll,
         trades: updatedTrades,
+        statusMessage: `GAIN em Mão Fixa! +$${profit.toFixed(2)}`,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
     } else {
       const gale1OpenTime = simData.entryCandleOpenTime + candleIntervalMs;
+      const g1TimeStr = new Date(gale1OpenTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
       await simRef.set({
         phase: 'GALE1',
         galeCandleOpenTime: gale1OpenTime,
         bankroll: newBankroll,
         trades: updatedTrades,
+        statusMessage: `LOSS em Mão Fixa. Entrando GALE 1 (${g1TimeStr})`,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
     }
@@ -266,15 +289,18 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
         phase: 'IDLE',
         bankroll: newBankroll,
         trades: updatedTrades,
+        statusMessage: `GAIN em Gale 1! +$${profit.toFixed(2)}`,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
     } else {
       const gale2OpenTime = simData.galeCandleOpenTime + candleIntervalMs;
+      const g2TimeStr = new Date(gale2OpenTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
       await simRef.set({
         phase: 'GALE2',
         galeCandleOpenTime: gale2OpenTime,
         bankroll: newBankroll,
         trades: updatedTrades,
+        statusMessage: `LOSS em Gale 1. Entrando GALE 2 (${g2TimeStr})`,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
     }
@@ -314,11 +340,12 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
     const updatedTrades = [...(simData.trades || []), tradeEntry].slice(-100);
     console.log(`[SIM] Gale 2 | ${simData.currentPair} | ${direction} | ${isGain ? 'GAIN' : 'LOSS'}`);
 
-    // Após Gale 2 sempre volta a IDLE
+    const finalMsg = isGain ? `GAIN em Gale 2! +$${profit.toFixed(2)}` : `LOSS Final em Gale 2. -$${Math.abs(profit).toFixed(2)}`;
     await simRef.set({
       phase: 'IDLE',
       bankroll: newBankroll,
       trades: updatedTrades,
+      statusMessage: finalMsg,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
     return;
