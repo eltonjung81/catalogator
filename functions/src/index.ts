@@ -30,7 +30,12 @@ const M5_STRATEGIES = [
 ];
 
 const M1_STRATEGIES = [
-  { name: 'Tendência M1', func: analyzeM1Trend, entryIndex: 0 }
+  { name: 'Tendência M1',  func: analyzeM1Trend,     entryIndex: 0 },
+  { name: 'MHI 1 (M1)',    func: analyzeMHI1,        entryIndex: 0 },
+  { name: 'MHI 2 (M1)',    func: analyzeMHI2,        entryIndex: 0 },
+  { name: 'MHI Maioria',   func: analyzeMHIMaioria,  entryIndex: 0 },
+  { name: 'Padrão 23',     func: analyzePadrao23,    entryIndex: 0 },
+  { name: 'Torres Gêmeas', func: analyzeTorresGemeas, entryIndex: 0 },
 ];
 
 // ============================================================================
