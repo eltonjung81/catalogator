@@ -90,7 +90,6 @@ const translations = {
     profitLabel: 'Accumulated Profit',
     timeLabel: 'Operating Time',
     daysLabel: 'Days',
-    daysLabel: 'Days',
     historyTitle: 'Trade History',
     minAccuracy: 'Minimum Accuracy',
     allAccuracy: 'All'
