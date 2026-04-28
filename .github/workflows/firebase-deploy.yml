@@ -26,6 +26,6 @@ jobs:
       - name: Deploy Firebase Functions
         uses: w9jds/firebase-action@master
         with:
-          args: deploy --only functions
+          args: deploy --only functions --project catalogador-pro
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
