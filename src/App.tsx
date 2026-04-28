@@ -48,7 +48,9 @@ const translations = {
     profitLabel: 'Lucro Acumulado',
     timeLabel: 'Tempo de Operação',
     daysLabel: 'Dias',
-    historyTitle: 'Histórico de Operações'
+    historyTitle: 'Histórico de Operações',
+    minAccuracy: 'Assertividade Mínima',
+    allAccuracy: 'Todas'
   },
   en: {
     title: 'Probabilistic Cataloger',
@@ -88,7 +90,10 @@ const translations = {
     profitLabel: 'Accumulated Profit',
     timeLabel: 'Operating Time',
     daysLabel: 'Days',
-    historyTitle: 'Trade History'
+    daysLabel: 'Days',
+    historyTitle: 'Trade History',
+    minAccuracy: 'Minimum Accuracy',
+    allAccuracy: 'All'
   }
 };
 
@@ -122,6 +127,7 @@ function App() {
   const [selectedPair, setSelectedPair] = useState<string>('ALL');
   const [selectedTimeframe, setSelectedTimeframe] = useState<number>(5);
   const [paymentMethod, setPaymentMethod] = useState<'mercadopago' | 'paypal'>('mercadopago');
+  const [minWinRate, setMinWinRate] = useState<number>(0);
 
   const t = translations[lang];
 
@@ -178,6 +184,13 @@ function App() {
 
     filtered = filtered.filter(s => s.timeframe === selectedTimeframe);
 
+    if (minWinRate > 0) {
+      filtered = filtered.filter(s => {
+        const stats = getScoreForSorting(s.rawHistory, galeLimit);
+        return stats.rate >= minWinRate;
+      });
+    }
+
     return filtered.sort((a, b) => {
       const scoreA = getScoreForSorting(a.rawHistory, galeLimit);
       const scoreB = getScoreForSorting(b.rawHistory, galeLimit);
@@ -187,7 +200,7 @@ function App() {
       }
       return scoreB.rate - scoreA.rate;
     });
-  }, [signals, galeLimit, selectedPair, selectedTimeframe, getScoreForSorting]);
+  }, [signals, galeLimit, selectedPair, selectedTimeframe, minWinRate, getScoreForSorting]);
 
   const uniquePairs = useMemo(() => {
     const pairs = new Set(signals.map(s => s.pair));
@@ -383,7 +396,6 @@ function App() {
               <option value={5}>{t.m5}</option>
             </select>
           </div>
-
           <div className="flex-1 min-w-[200px]">
             <label className="flex items-center gap-2 text-sm font-semibold text-slate-400 mb-2">
               <Filter size={16} /> {t.martingale}
@@ -397,6 +409,25 @@ function App() {
               <option value={1}>{t.gale1}</option>
               <option value={2}>{t.gale2}</option>
               <option value={3}>{t.gale3}</option>
+            </select>
+          </div>
+
+          <div className="flex-1 min-w-[200px]">
+            <label className="flex items-center gap-2 text-sm font-semibold text-slate-400 mb-2">
+              <Zap size={16} className="text-emerald-400" /> {t.minAccuracy}
+            </label>
+            <select
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white outline-none focus:border-blue-500 transition-colors"
+              value={minWinRate}
+              onChange={(e) => setMinWinRate(Number(e.target.value))}
+            >
+              <option value={0}>{t.allAccuracy}</option>
+              <option value={80}>80%+</option>
+              <option value={85}>85%+</option>
+              <option value={90}>90%+</option>
+              <option value={92}>92%+</option>
+              <option value={95}>95%+</option>
+              <option value={100}>100%</option>
             </select>
           </div>
         </section>

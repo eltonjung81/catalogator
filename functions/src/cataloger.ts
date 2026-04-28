@@ -7,6 +7,7 @@ export interface Candle {
   high: number;
   low: number;
   close: number;
+  volume: number;
   color: 'GREEN' | 'RED' | 'DOJI';
 }
 
@@ -34,6 +35,7 @@ export const fetchCandles = async (symbol: string, interval: string = '1m', limi
           high: parseFloat(data[2]),
           low: parseFloat(data[3]),
           close,
+          volume: parseFloat(data[5]),
           color
         };
       });
@@ -313,22 +315,24 @@ export const runCataloger = (
  * Baseia-se na quantidade de DOJIs e na variedade de preços.
  */
 export const isDeadChart = (candles: Candle[], dojiThreshold: number = 20, uniquePriceThreshold: number = 15): boolean => {
-  if (candles.length < 60) return false; // Pouco dado, não bloqueia ainda
+  if (candles.length < 60) return false; 
 
-  // Analisamos as últimas 100 velas (ou o que tiver disponível)
   const recent = candles.slice(-100);
   const total = recent.length;
 
   const dojis = recent.filter(c => c.color === 'DOJI').length;
   const dojiRate = (dojis / total) * 100;
 
-  // Conta quantos níveis de preço de fechamento diferentes existem
   const uniquePrices = new Set(recent.map(c => c.close)).size;
 
-  // Critérios:
-  // 1. Mais de X% das velas são DOJI (preço não se moveu entre abertura e fechamento)
-  // 2. Menos de Y preços diferentes em 100 velas (movimento em degraus fixos)
-  if (dojiRate > dojiThreshold || uniquePrices < uniquePriceThreshold) {
+  // Filtro de Volume: se o volume médio recente for muito baixo (ex: < 0.1 BTC para BTCUSDT)
+  // Como os ativos variam, vamos usar uma comparação relativa: 
+  // se o volume médio das últimas 20 velas for < 30% da média das últimas 100.
+  const recentVolume = recent.slice(-20).reduce((acc, c) => acc + c.volume, 0) / 20;
+  const averageVolume = recent.reduce((acc, c) => acc + c.volume, 0) / total;
+  const volumeDrop = averageVolume > 0 ? (recentVolume / averageVolume) : 1;
+
+  if (dojiRate > dojiThreshold || uniquePrices < uniquePriceThreshold || volumeDrop < 0.3) {
     return true;
   }
 

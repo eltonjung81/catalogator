@@ -122,17 +122,23 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
       return;
     }
     // Pre-calcula scores incluindo liquidez
-    const signalsWithLiquidity = await Promise.all(liveSignals.map(async s => {
+    const signalsWithLiquidity = (await Promise.all(liveSignals.map(async s => {
       const candles = await fetchCandles(s.pair, interval, 100);
       const dojis = candles.filter(c => c.color === 'DOJI').length;
       const dojiRate = (dojis / (candles.length || 1)) * 100;
+      
+      const recent = s.rawHistory.slice(-100);
+      const wins = recent.filter((r: any) => r.result >= 0).length;
+      const winRate = (wins / (recent.length || 1)) * 100;
+
       return { 
         ...s, 
         dojiRate, 
+        winRate,
         candles, // Cache para uso posterior
         score: getScore(s.rawHistory, dojiRate) 
       };
-    }));
+    }))).filter(s => s.winRate >= 92); // FILTRO DE PROTEÇÃO: Somente estratégias com > 92%
 
     const sorted = signalsWithLiquidity.sort((a, b) => b.score - a.score);
     const topCandidates = sorted.slice(0, 5); 
@@ -168,16 +174,24 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
     }
 
     if (!bestCandidate) {
-      const top1 = topCandidates[0];
-      console.log(`[SIM] Nenhum sinal nos top 3. Monitorando ${top1.pair}.`);
-      await simRef.set({
-        currentPair: top1.pair,
-        currentPattern: top1.pattern,
-        currentDirection: null,
-        phase: 'IDLE',
-        statusMessage: `Monitorando ${top1.pair}...`,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
+      if (topCandidates.length > 0) {
+        const top1 = topCandidates[0];
+        console.log(`[SIM] Nenhum sinal nos top 3. Monitorando ${top1.pair}.`);
+        await simRef.set({
+          currentPair: top1.pair,
+          currentPattern: top1.pattern,
+          currentDirection: null,
+          phase: 'IDLE',
+          statusMessage: `Monitorando ${top1.pair}...`,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      } else {
+        console.log('[SIM] Nenhum sinal atende aos critérios de segurança (>92% winrate).');
+        await simRef.set({
+          statusMessage: 'Aguardando mercado favorável (>92% assertividade)...',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      }
       return;
     }
 
