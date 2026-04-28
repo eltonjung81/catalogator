@@ -239,7 +239,7 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
                    (direction === 'PUT'  && entryCandle.color === 'RED');
     const profit = calcBetProfit(currentBet, isGain);
     const newBankroll = parseFloat((simData.bankroll + profit).toFixed(2));
-    const nextBet = isGain ? Math.max(1, currentBet - 0.5) : currentBet + 0.5;
+    const nextBet = isGain ? Math.max(1, parseFloat((currentBet / 1.3).toFixed(2))) : parseFloat((currentBet * 1.3).toFixed(2));
     const newMaxBet = Math.max(maxBet, currentBet, nextBet);
 
     const tradeEntry = {
@@ -301,7 +301,7 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
                    (direction === 'PUT'  && galeCandle.color === 'RED');
     const profit = calcBetProfit(currentBet, isGain);
     const newBankroll = parseFloat((simData.bankroll + profit).toFixed(2));
-    const nextBet = isGain ? Math.max(1, currentBet - 0.5) : currentBet + 0.5;
+    const nextBet = isGain ? Math.max(1, parseFloat((currentBet / 1.3).toFixed(2))) : parseFloat((currentBet * 1.3).toFixed(2));
     const newMaxBet = Math.max(maxBet, currentBet, nextBet);
 
     const tradeEntry = {
@@ -363,7 +363,7 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
                    (direction === 'PUT'  && galeCandle.color === 'RED');
     const profit = calcBetProfit(currentBet, isGain);
     const newBankroll = parseFloat((simData.bankroll + profit).toFixed(2));
-    const nextBet = isGain ? Math.max(1, currentBet - 0.5) : currentBet + 0.5;
+    const nextBet = isGain ? Math.max(1, parseFloat((currentBet / 1.3).toFixed(2))) : parseFloat((currentBet * 1.3).toFixed(2));
     const newMaxBet = Math.max(maxBet, currentBet, nextBet);
 
     const tradeEntry = {
