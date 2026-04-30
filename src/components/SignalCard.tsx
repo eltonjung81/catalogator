@@ -10,6 +10,8 @@ interface SignalCardProps {
   timeframe: number;
   updatedAt?: any; // Firestore Timestamp
   lang: 'pt' | 'en';
+  score?: number;
+  isRecovery?: boolean;
 }
 
 const cardTranslations = {
@@ -92,10 +94,9 @@ const getTimeAgo = (updatedAt: any, lang: 'pt' | 'en'): string => {
   return `${diffH}${t.hourAgo}`;
 };
 
-export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistory, galeLimit, updatedAt, lang }) => {
+export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistory, galeLimit, updatedAt, lang, score = 0, isRecovery = false }) => {
   const t = cardTranslations[lang];
   // Recalcula estatísticas localmente
-  // CORRIGIDO: normaliza rawHistory antes de processar para suportar {result,time}
   const stats = useMemo(() => {
     let winDirect = 0;
     let g1 = 0;
@@ -103,50 +104,44 @@ export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistor
     let g3 = 0;
     let hit = 0;
 
-    let score = 0;
+    let localScore = 0;
     const trendData: { score: number }[] = [];
     const visualBlocks: number[] = [];
 
-    // Considera apenas as últimas 100 entradas para a estatística
-    // Normaliza ANTES de processar — corrige o bug de rawHistory como objetos
     const recentHistory = rawHistory.slice(-100).map(normalizeResult);
 
     for (const rawResult of recentHistory) {
-      // Hit ocorre se o resultado foi Loss total, ou se exigiu mais gales do que o limite
       const isHit = rawResult === -1 || rawResult > galeLimit;
 
       if (isHit) {
         hit++;
         visualBlocks.push(-1);
-        score -= 2;
+        localScore -= 2;
       } else {
         if (rawResult === 0) winDirect++;
         else if (rawResult === 1) g1++;
         else if (rawResult === 2) g2++;
         else if (rawResult === 3) g3++;
         visualBlocks.push(rawResult);
-        score += 1;
+        localScore += 1;
       }
-      trendData.push({ score });
+      trendData.push({ score: localScore });
     }
 
     const totalTrades = recentHistory.length;
     const totalWins = winDirect + g1 + g2 + g3;
     const winRate = totalTrades > 0 ? Math.round((totalWins / totalTrades) * 100) : 0;
 
-    // Tendência = delta do score nas últimas 10 operações
     const recentScoreDelta = trendData.length > 10
       ? trendData[trendData.length - 1].score - trendData[trendData.length - 10].score
       : 0;
 
     return { winDirect, g1, g2, g3, hit, winRate, totalTrades, visualBlocks, trendData, recentScoreDelta };
-    // CORRIGIDO: updatedAt incluído como dependência para forçar recálculo quando o Firebase atualiza
   }, [rawHistory, galeLimit, updatedAt]);
 
   const [showDetails, setShowDetails] = React.useState(false);
 
   const getPatternDescription = (name: string) => {
-    // Normaliza o nome para o lookup (remove (M1) se houver)
     const normalizedName = name.replace(/\s+\(M1\)$/, '');
     
     const descriptions: Record<string, { desc: string, logic: string, candles: string[] }> = {
@@ -184,18 +179,24 @@ export const SignalCard: React.FC<SignalCardProps> = ({ pair, pattern, rawHistor
   const isUpTrend = stats.recentScoreDelta >= 0;
   const timeAgo = getTimeAgo(updatedAt, lang);
 
-  // Cor do winRate: ≥85% verde, ≥70% amarelo, <70% vermelho
   const winRateColor =
     stats.winRate >= 85 ? 'text-emerald-400' :
     stats.winRate >= 70 ? 'text-amber-400' :
     'text-red-400';
 
   return (
-    <div className="bg-slate-800 rounded-xl p-4 shadow-lg border border-slate-700 hover:border-blue-500/60 transition-all duration-200 w-full flex flex-col justify-between hover:shadow-blue-500/5 hover:shadow-lg">
+    <div className={`bg-slate-800 rounded-xl p-4 shadow-lg border transition-all duration-200 w-full flex flex-col justify-between hover:shadow-blue-500/5 hover:shadow-lg relative overflow-hidden ${isRecovery ? 'border-amber-500 shadow-amber-500/10' : 'border-slate-700 hover:border-blue-500/60'}`}>
+      {isRecovery && (
+        <div className="absolute top-0 right-0 bg-amber-500 text-slate-900 text-[9px] font-black px-2 py-0.5 rounded-bl-lg animate-pulse z-10">
+          RECOVERY ZONE
+        </div>
+      )}
       <div>
         <div className="flex justify-between items-center mb-2">
           <div className="flex items-center gap-2">
-            <span className="text-xl">🌐</span>
+            <div className="bg-slate-900/80 px-1.5 py-0.5 rounded border border-slate-700 text-[10px] font-mono text-blue-400 font-bold" title="Score Priority">
+              {Math.round(score)}
+            </div>
             <h3 className="text-white font-bold">{pair}</h3>
           </div>
           <div className="text-right">

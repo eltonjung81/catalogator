@@ -155,7 +155,11 @@ async function runSimulator(prefTF, allSignalsData) {
     }
     // ── IDLE: Procura novo sinal e seta M_FIXA enquanto vela ainda está aberta ─
     if (phase === 'IDLE') {
-        const liveSignals = allSignalsData.filter(s => s.rawHistory && s.rawHistory.length > 0 && !s.isDead);
+        const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+        const liveSignals = allSignalsData.filter(s => {
+            const isRecent = s.updatedAt && (s.updatedAt.toMillis ? s.updatedAt.toMillis() : s.updatedAt) > fiveMinutesAgo;
+            return s.rawHistory && s.rawHistory.length > 0 && !s.isDead && isRecent;
+        });
         if (liveSignals.length === 0) {
             console.log('[SIM] Nenhum sinal ativo disponível.');
             return;
@@ -260,7 +264,9 @@ async function runSimulator(prefTF, allSignalsData) {
             (direction === 'PUT' && entryCandle.color === 'RED');
         const profit = calcBetProfit(currentBet, isGain);
         const newBankroll = parseFloat((simData.bankroll + profit).toFixed(2));
-        const nextBet = isGain ? Math.max(1, parseFloat((currentBet / 1.3).toFixed(2))) : parseFloat((currentBet * 1.3).toFixed(2));
+        let nextBet = isGain ? Math.max(1, parseFloat((currentBet / 1.3).toFixed(2))) : parseFloat((currentBet * 1.3).toFixed(2));
+        if (isGain && currentBet >= 50)
+            nextBet = 10;
         const newMaxBet = Math.max(maxBet, currentBet, nextBet);
         const tradeEntry = {
             id: `${simData.lastCycleId}_MF`,
@@ -317,7 +323,9 @@ async function runSimulator(prefTF, allSignalsData) {
             (direction === 'PUT' && galeCandle.color === 'RED');
         const profit = calcBetProfit(currentBet, isGain);
         const newBankroll = parseFloat((simData.bankroll + profit).toFixed(2));
-        const nextBet = isGain ? Math.max(1, parseFloat((currentBet / 1.3).toFixed(2))) : parseFloat((currentBet * 1.3).toFixed(2));
+        let nextBet = isGain ? Math.max(1, parseFloat((currentBet / 1.3).toFixed(2))) : parseFloat((currentBet * 1.3).toFixed(2));
+        if (isGain && currentBet >= 50)
+            nextBet = 10;
         const newMaxBet = Math.max(maxBet, currentBet, nextBet);
         const tradeEntry = {
             id: `${simData.lastCycleId}_G1`,
@@ -374,7 +382,9 @@ async function runSimulator(prefTF, allSignalsData) {
             (direction === 'PUT' && galeCandle.color === 'RED');
         const profit = calcBetProfit(currentBet, isGain);
         const newBankroll = parseFloat((simData.bankroll + profit).toFixed(2));
-        const nextBet = isGain ? Math.max(1, parseFloat((currentBet / 1.3).toFixed(2))) : parseFloat((currentBet * 1.3).toFixed(2));
+        let nextBet = isGain ? Math.max(1, parseFloat((currentBet / 1.3).toFixed(2))) : parseFloat((currentBet * 1.3).toFixed(2));
+        if (isGain && currentBet >= 50)
+            nextBet = 10;
         const newMaxBet = Math.max(maxBet, currentBet, nextBet);
         const tradeEntry = {
             id: `${simData.lastCycleId}_G2`,

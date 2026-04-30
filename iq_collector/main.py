@@ -389,6 +389,17 @@ def fetch_iq_candles(api: IQ_Option, pair: str, timeframe_seconds: int, count: i
 
         # Ordena por tempo crescente
         candles.sort(key=lambda x: x["openTime"])
+        
+        # ── VALIDAÇÃO DE MERCADO ATIVO ───────────────────────────────────────
+        if candles:
+            last_candle_time_ms = candles[-1]["openTime"]
+            now_ms = int(time.time() * 1000)
+            age_minutes = (now_ms - last_candle_time_ms) / 60000
+            
+            if age_minutes > 5:
+                log.debug(f"[{pair}] Mercado fechado ou congelado (Last candle: {age_minutes:.1f} min ago). Pulando.")
+                return []
+                
         return candles
 
     except Exception as e:

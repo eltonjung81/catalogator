@@ -206,8 +206,8 @@ function App() {
     return signalsBinance; // 'binance' (padrão)
   }, [dataSource, signalsBinance, signalsIQ]);
 
-  const getScoreForSorting = useCallback((rawHistory: any[], limit: number): { rate: number; trendScore: number } => {
-    if (!rawHistory || rawHistory.length === 0) return { rate: 0, trendScore: -999 };
+  const getScoreForSorting = useCallback((rawHistory: any[], limit: number): { rate: number; trendScore: number; finalScore: number; isRecovery: boolean } => {
+    if (!rawHistory || rawHistory.length === 0) return { rate: 0, trendScore: -999, finalScore: 0, isRecovery: false };
     const recent = rawHistory.slice(-100);
     let wins = 0;
     let trendScore = 0;
@@ -223,11 +223,29 @@ function App() {
     });
 
     const rate = recent.length > 0 ? (wins / recent.length) * 100 : 0;
-    return { rate, trendScore };
+    
+    // Bônus de Recuperação (Rebound Bonus)
+    let reboundBonus = 0;
+    let isRecovery = false;
+    if (rate >= 95 && recent.length > 0) {
+      const lastResult = normalizeResult(recent[recent.length - 1]);
+      if (lastResult === -1) { // Último sinal foi um LOSS (Hit)
+        reboundBonus = 15; // Bônus alto para destacar a oportunidade de recuperação
+        isRecovery = true;
+      }
+    }
+
+    const finalScore = rate + reboundBonus;
+
+    return { rate, trendScore, finalScore, isRecovery };
   }, []);
 
   const displaySignals = useMemo(() => {
-    let filtered = signals;
+    let filtered = signals.map(s => {
+      const stats = getScoreForSorting(s.rawHistory, galeLimit);
+      return { ...s, stats };
+    });
+
     if (selectedPair !== 'ALL') {
       filtered = filtered.filter(s => s.pair === selectedPair);
     }
@@ -235,20 +253,14 @@ function App() {
     filtered = filtered.filter(s => s.timeframe === selectedTimeframe);
 
     if (minWinRate > 0) {
-      filtered = filtered.filter(s => {
-        const stats = getScoreForSorting(s.rawHistory, galeLimit);
-        return stats.rate >= minWinRate;
-      });
+      filtered = filtered.filter(s => s.stats.rate >= minWinRate);
     }
 
     return filtered.sort((a, b) => {
-      const scoreA = getScoreForSorting(a.rawHistory, galeLimit);
-      const scoreB = getScoreForSorting(b.rawHistory, galeLimit);
-
-      if (scoreA.trendScore !== scoreB.trendScore) {
-        return scoreB.trendScore - scoreA.trendScore;
+      if (a.stats.finalScore !== b.stats.finalScore) {
+        return b.stats.finalScore - a.stats.finalScore;
       }
-      return scoreB.rate - scoreA.rate;
+      return b.stats.trendScore - a.stats.trendScore;
     });
   }, [signals, galeLimit, selectedPair, selectedTimeframe, minWinRate, getScoreForSorting]);
 
@@ -562,6 +574,8 @@ function App() {
                 timeframe={selectedTimeframe}
                 updatedAt={signal.updatedAt}
                 lang={lang}
+                score={signal.stats.finalScore}
+                isRecovery={signal.stats.isRecovery}
               />
             ))
           )}
