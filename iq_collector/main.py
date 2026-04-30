@@ -485,29 +485,9 @@ def run_collection_cycle(api: IQ_Option):
     log.info("─" * 60)
     log.info(f"🔄 Iniciando ciclo de coleta — {datetime.now().strftime('%H:%M:%S')}")
 
-    # Define quais pares estão ativos (OTC sempre, Forex só em horário de mercado)
-    all_actives = api.get_all_open_time()
-    active_otc   = all_actives.get("turbo", {})   # OTC (Digital Options turbo)
-    active_forex = all_actives.get("binary", {})  # Binary / Forex
-
-    pairs_to_process = []
-
-    for pair in OTC_PAIRS:
-        # OTC pairs: verificar se estão abertos
-        pair_info = active_otc.get(pair, {}) or active_forex.get(pair, {})
-        is_open = pair_info.get("open", False) if pair_info else True  # Default: tenta mesmo assim
-        if is_open or "-OTC" in pair:  # OTC sempre tenta
-            pairs_to_process.append(pair)
-        else:
-            log.debug(f"[{pair}] Mercado fechado. Pulando.")
-
-    for pair in FOREX_PAIRS:
-        pair_info = active_forex.get(pair, {}) or active_otc.get(pair, {})
-        is_open = pair_info.get("open", False) if pair_info else False
-        if is_open:
-            pairs_to_process.append(pair)
-        else:
-            log.debug(f"[{pair}] Forex fechado. Pulando.")
+    # Tenta processar todos os pares definidos. Se estiverem fechados, a API retornará vazio.
+    pairs_to_process = OTC_PAIRS + FOREX_PAIRS
+    log.info(f"📊 Processando {len(pairs_to_process)} pares (OTC + Forex)")
 
     log.info(f"📊 Pares ativos para coleta: {len(pairs_to_process)}")
 

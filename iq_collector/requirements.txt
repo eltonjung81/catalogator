@@ -1,4 +1,8 @@
-https://github.com/Lu-Yi-Hsun/iqoptionapi/archive/refs/heads/master.zip
 firebase-admin==6.5.0
+iqoptionapi @ git+https://github.com/Lu-Yi-Hsun/iqoptionapi.git@master
 python-dotenv==1.0.1
+certifi==2024.2.2
+pyopenssl==24.1.0
+cryptography==42.0.5
 requests==2.31.0
+urllib3==2.2.1
