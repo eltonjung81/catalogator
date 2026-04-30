@@ -6,14 +6,16 @@ import { auth, loginWithGoogle, loginAnonymously, db } from '../lib/firebase';
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  timeRemaining: number | null; // Em segundos
+  isAdmin: boolean;
+  timeRemaining: number | null;
   login: () => Promise<void>;
   refreshPremiumStatus: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType>({ 
-  user: null, 
-  loading: true, 
+const AuthContext = createContext<AuthContextType>({
+  user: null,
+  loading: true,
+  isAdmin: false,
   timeRemaining: null,
   login: async () => {},
   refreshPremiumStatus: async () => {}
@@ -168,8 +170,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [timeRemaining]);
 
+  const isAdmin = user?.email === 'eltonjung81@gmail.com';
+
   return (
-    <AuthContext.Provider value={{ user, loading, timeRemaining, login, refreshPremiumStatus }}>
+    <AuthContext.Provider value={{ user, loading, isAdmin, timeRemaining, login, refreshPremiumStatus }}>
       {children}
     </AuthContext.Provider>
   );

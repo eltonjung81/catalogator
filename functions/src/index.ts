@@ -1,4 +1,4 @@
-// Robot Version 4.0 — Clean State Machine Simulator
+// Robot Version 5.0 — Binance + IQ Option Multi-Source Simulator
 import * as admin from 'firebase-admin';
 import { onSchedule } from "firebase-functions/v2/scheduler";
 
@@ -25,7 +25,50 @@ import {
 
 const db = admin.firestore();
 
+// ── Pares Binance (Cripto) ────────────────────────────────────────────────────
 const PAIRS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'DOTUSDT'];
+
+// ── Pares IQ Option que necessitam de dados do Firestore (via Python collector) ──
+const IQ_FOREX_PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF', 'EURGBP', 'EURJPY', 'GBPJPY', 'NZDUSD'];
+
+/**
+ * Detecta se um par é da IQ Option (OTC ou Forex).
+ * Esses pares têm candles armazenados no Firestore pelo Python collector.
+ */
+const isIQOptionPair = (pair: string): boolean => {
+  return pair.includes('-OTC') || IQ_FOREX_PAIRS.includes(pair);
+};
+
+/**
+ * Busca candles de pares IQ Option do Firestore.
+ * O Python collector escreve em `candles_iq/{pair}_M{tf}` a cada minuto.
+ */
+const fetchCandlesIQ = async (pair: string, tf: number): Promise<Candle[]> => {
+  try {
+    const docRef = db.collection('candles_iq').doc(`${pair}_M${tf}`);
+    const snap = await docRef.get();
+    if (!snap.exists) {
+      console.log(`[IQ] candles_iq/${pair}_M${tf} ainda não disponível.`);
+      return [];
+    }
+    const data = snap.data();
+    return (data?.candles || []) as Candle[];
+  } catch (err) {
+    console.error(`[IQ] Erro ao buscar candles_iq/${pair}_M${tf}:`, err);
+    return [];
+  }
+};
+
+/**
+ * Roteador: busca candles da fonte correta baseado no par.
+ */
+const fetchCandlesAny = async (pair: string, interval: string, limit: number): Promise<Candle[]> => {
+  if (isIQOptionPair(pair)) {
+    const tf = interval === '1m' ? 1 : 5;
+    return fetchCandlesIQ(pair, tf);
+  }
+  return fetchCandles(pair, interval, limit);
+};
 
 const M5_STRATEGIES = [
   { name: 'MHI 1',          func: analyzeMHI1,          entryIndex: 0 },
@@ -98,18 +141,62 @@ const getScore = (history: TradeResult[], dojiRate: number = 0): number => {
 //     LOSS → registra LOSS → IDLE
 // ============================================================================
 
+const isMarketPaused = (): boolean => {
+  const now = new Date();
+  // Converte para o horário de Brasília
+  const brTime = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(now);
+
+  const hour = parseInt(brTime.find(p => p.type === 'hour')?.value || '0');
+  const minute = parseInt(brTime.find(p => p.type === 'minute')?.value || '0');
+
+  // Pausa das 22:30 até às 06:59
+  const isNight = (hour >= 23) || (hour === 22 && minute >= 30) || (hour < 7);
+  return isNight;
+};
+
+interface SimData {
+  phase: string;
+  bankroll: number;
+  currentBet: number;
+  maxBet: number;
+  trades?: any[];
+  lastCycleId?: string | null;
+  currentPair?: string;
+  currentPattern?: string;
+  currentDirection?: any;
+  entryCandleOpenTime?: number;
+  galeCandleOpenTime?: number | null;
+  statusMessage?: string;
+}
+
 async function runSimulator(prefTF: number, allSignalsData: any[]) {
   const simRef = db.collection("stats").doc("global_simulator");
   const simSnap = await simRef.get();
-  const simData = simSnap.exists
-    ? simSnap.data()!
-    : { phase: 'IDLE', bankroll: 5000, trades: [], lastCycleId: null, currentBet: 1, maxBet: 1 };
+  const rawData = (simSnap.data() || {}) as SimData;
+  
+  const phase = rawData.phase || 'IDLE';
+  const bankroll = (typeof rawData.bankroll === 'number' && !isNaN(rawData.bankroll)) ? rawData.bankroll : 5000;
+  const currentBet = (typeof rawData.currentBet === 'number' && !isNaN(rawData.currentBet)) ? rawData.currentBet : 1;
+  const maxBet = (typeof rawData.maxBet === 'number' && !isNaN(rawData.maxBet)) ? rawData.maxBet : 1;
 
-  const phase: string = simData.phase || 'IDLE';
-  const currentBet: number = simData.currentBet ?? 1;
-  const maxBet: number = simData.maxBet ?? 1;
+  const simData: any = { ...rawData, phase, bankroll, currentBet, maxBet };
   const interval = prefTF === 1 ? '1m' : '5m';
   const candleIntervalMs = prefTF * 60 * 1000;
+
+  // ── VERIFICAÇÃO DE PAUSA NOTURNA ──────────────────────────────────────────
+  if (isMarketPaused() && phase === 'IDLE') {
+    console.log('[SIM] Mercado pausado (Horário Noturno: 22:30 - 07:00)');
+    await simRef.set({
+      statusMessage: 'Mercado Pausado (Retorno às 07:00)',
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    return;
+  }
 
   // ── IDLE: Procura novo sinal e seta M_FIXA enquanto vela ainda está aberta ─
   if (phase === 'IDLE') {
@@ -123,7 +210,7 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
     }
     // Pre-calcula scores incluindo liquidez
     const signalsWithLiquidity = (await Promise.all(liveSignals.map(async s => {
-      const candles = await fetchCandles(s.pair, interval, 100);
+      const candles = await fetchCandlesAny(s.pair, interval, 100);
       const dojis = candles.filter(c => c.color === 'DOJI').length;
       const dojiRate = (dojis / (candles.length || 1)) * 100;
       
@@ -226,7 +313,7 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
 
   // ── M_FIXA: Aguarda vela de entrada fechar e processa resultado ───────────
   if (phase === 'M_FIXA') {
-    const candles = await fetchCandles(simData.currentPair, interval, 10);
+    const candles = await fetchCandlesAny(simData.currentPair, interval, 10);
     const entryCandle = candles.find((c: Candle) => c.openTime === simData.entryCandleOpenTime);
 
     if (!entryCandle) {
@@ -288,7 +375,7 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
 
   // ── GALE 1: Aguarda vela fechar e processa ────────────────────────────────
   if (phase === 'GALE1') {
-    const candles = await fetchCandles(simData.currentPair, interval, 10);
+    const candles = await fetchCandlesAny(simData.currentPair, interval, 10);
     const galeCandle = candles.find((c: Candle) => c.openTime === simData.galeCandleOpenTime);
 
     if (!galeCandle) {
@@ -350,7 +437,7 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
 
   // ── GALE 2: Aguarda vela fechar e processa (último gale) ──────────────────
   if (phase === 'GALE2') {
-    const candles = await fetchCandles(simData.currentPair, interval, 10);
+    const candles = await fetchCandlesAny(simData.currentPair, interval, 10);
     const galeCandle = candles.find((c: Candle) => c.openTime === simData.galeCandleOpenTime);
 
     if (!galeCandle) {
@@ -469,23 +556,37 @@ export const analyzeMarketAndSave = onSchedule({
   await Promise.all(catalogingTasks);
 
   // ============================================================
-  // FASE 2: Simulador — máquina de estado limpa
+  // FASE 2: Simulador — máquina de estado limpa (multi-fonte)
   // ============================================================
   try {
     const configSnap = await db.collection("stats").doc("config").get();
-    const config = configSnap.exists ? configSnap.data()! : { preferredTimeframe: 5 };
+    const config = configSnap.exists ? configSnap.data()! : { preferredTimeframe: 5, dataSource: 'binance' };
     const prefTF = config.preferredTimeframe || 5;
+    const dataSource: string = config.dataSource || 'binance';
 
-    const allSignalsSnap = await db.collection("signals")
-      .where("timeframe", "==", prefTF)
-      .get();
+    let allSignalsData: any[] = [];
 
-    if (allSignalsSnap.empty) {
-      console.log(`[SIM] Nenhum sinal M${prefTF} disponível.`);
+    // Lê da coleção Binance se dataSource for 'binance' ou 'all'
+    if (dataSource === 'binance' || dataSource === 'all') {
+      const binanceSnap = await db.collection("signals")
+        .where("timeframe", "==", prefTF)
+        .get();
+      allSignalsData = [...allSignalsData, ...binanceSnap.docs.map(d => d.data())];
+    }
+
+    // Lê da coleção IQ Option se dataSource for 'iqoption' ou 'all'
+    if (dataSource === 'iqoption' || dataSource === 'all') {
+      const iqSnap = await db.collection("signals_iq")
+        .where("timeframe", "==", prefTF)
+        .get();
+      allSignalsData = [...allSignalsData, ...iqSnap.docs.map(d => d.data())];
+    }
+
+    if (allSignalsData.length === 0) {
+      console.log(`[SIM] Nenhum sinal M${prefTF} disponível para dataSource='${dataSource}'.`);
       return;
     }
 
-    const allSignalsData = allSignalsSnap.docs.map(doc => doc.data());
     await runSimulator(prefTF, allSignalsData);
 
   } catch (error) {

@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
-import { collection, onSnapshot, query } from 'firebase/firestore';
+import { collection, onSnapshot, query, doc, setDoc, onSnapshot as onDocSnapshot } from 'firebase/firestore';
 import { PayPalScriptProvider } from '@paypal/react-paypal-js';
 import { db, trackEvent } from './lib/firebase';
 import { SignalCard } from './components/SignalCard';
@@ -7,7 +7,7 @@ import { TradeSimulator } from './components/TradeSimulator';
 import { PayPalPayment } from './components/PayPalPayment';
 import { MercadoPagoPayment } from './components/MercadoPagoPayment';
 import { useAuth } from './contexts/AuthContext';
-import { Filter, Clock, Activity, Search, Info, LogIn, Zap } from 'lucide-react';
+import { Filter, Clock, Activity, Search, Info, LogIn, Zap, Database, Shield } from 'lucide-react';
 
 const translations = {
   pt: {
@@ -112,12 +112,19 @@ const normalizeResult = (r: any): number => {
 };
 
 function App() {
-  const { user, loading: authLoading, timeRemaining, login } = useAuth();
-  const [signals, setSignals] = useState<SignalData[]>([]);
+  const { user, loading: authLoading, isAdmin, timeRemaining, login } = useAuth();
+
+  // ── Sinais por fonte ─────────────────────────────────────────────────────
+  const [signalsBinance, setSignalsBinance] = useState<SignalData[]>([]);
+  const [signalsIQ, setSignalsIQ] = useState<SignalData[]>([]);
   const [loadingData, setLoadingData] = useState(true);
 
+  // ── Fonte de dados global (lida do Firestore em tempo real) ────────────────
+  // Valores: 'binance' | 'iqoption' | 'all'
+  const [dataSource, setDataSourceLocal] = useState<'binance' | 'iqoption' | 'all'>('binance');
+  const [savingSource, setSavingSource] = useState(false);
+
   const [lang, setLang] = useState<'pt' | 'en'>(() => {
-    // Detecta o idioma do navegador
     const browserLang = navigator.language.toLowerCase();
     return browserLang.startsWith('pt') ? 'pt' : 'en';
   });
@@ -134,26 +141,70 @@ function App() {
     trackEvent('page_view', { language: lang });
   }, [lang]);
 
+  // ── Ouve a fonte de dados global do Firestore (stats/config.dataSource) ───
   useEffect(() => {
-    const q = query(collection(db, "signals"));
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedSignals: SignalData[] = [];
-      snapshot.forEach((doc) => {
-        fetchedSignals.push({
-          id: doc.id,
-          ...doc.data()
-        } as SignalData);
-      });
-      setSignals(fetchedSignals);
-      setLoadingData(false);
-    }, (error) => {
-      console.error("Erro ao buscar sinais:", error);
-      setLoadingData(false);
+    const configRef = doc(db, 'stats', 'config');
+    const unsubConfig = onDocSnapshot(configRef, (snap) => {
+      if (snap.exists()) {
+        const src = snap.data()?.dataSource;
+        if (src === 'binance' || src === 'iqoption' || src === 'all') {
+          setDataSourceLocal(src);
+        }
+      }
     });
-
-    return () => unsubscribe();
+    return () => unsubConfig();
   }, []);
+
+  // ── Salva a fonte de dados no Firestore quando o admin muda ─────────────
+  const handleDataSourceChange = async (newSource: 'binance' | 'iqoption' | 'all') => {
+    if (!isAdmin) return;
+    setSavingSource(true);
+    try {
+      await setDoc(doc(db, 'stats', 'config'), { dataSource: newSource }, { merge: true });
+      trackEvent('admin_change_datasource', { source: newSource });
+    } catch (err) {
+      console.error('Erro ao salvar dataSource:', err);
+    } finally {
+      setSavingSource(false);
+    }
+  };
+
+  // ── Ouve AMBAS as coleções de sinais simultaneamente ─────────────────────
+  // A filtragem por fonte acontece no useMemo abaixo (sem re-subscribe)
+  useEffect(() => {
+    let binanceReady = false;
+    let iqReady = false;
+    const checkDone = () => { if (binanceReady && iqReady) setLoadingData(false); };
+
+    const unsubBinance = onSnapshot(
+      query(collection(db, 'signals')),
+      (snap) => {
+        setSignalsBinance(snap.docs.map(d => ({ id: d.id, ...d.data() } as SignalData)));
+        binanceReady = true;
+        checkDone();
+      },
+      () => { binanceReady = true; checkDone(); }
+    );
+
+    const unsubIQ = onSnapshot(
+      query(collection(db, 'signals_iq')),
+      (snap) => {
+        setSignalsIQ(snap.docs.map(d => ({ id: d.id, ...d.data() } as SignalData)));
+        iqReady = true;
+        checkDone();
+      },
+      () => { iqReady = true; checkDone(); } // Ainda não tem dados → não bloqueia
+    );
+
+    return () => { unsubBinance(); unsubIQ(); };
+  }, []);
+
+  // ── Sinais ativos baseados na fonte configurada pelo admin ──────────────
+  const signals = useMemo(() => {
+    if (dataSource === 'iqoption') return signalsIQ;
+    if (dataSource === 'all') return [...signalsBinance, ...signalsIQ];
+    return signalsBinance; // 'binance' (padrão)
+  }, [dataSource, signalsBinance, signalsIQ]);
 
   const getScoreForSorting = useCallback((rawHistory: any[], limit: number): { rate: number; trendScore: number } => {
     if (!rawHistory || rawHistory.length === 0) return { rate: 0, trendScore: -999 };
@@ -365,7 +416,7 @@ function App() {
         </header>
 
         {/* Barra de Filtros */}
-        <section className="bg-slate-800 rounded-xl p-4 mb-8 border border-slate-700 flex flex-wrap gap-4 items-end">
+        <section className="bg-slate-800 rounded-xl p-4 mb-4 border border-slate-700 flex flex-wrap gap-4 items-end">
           <div className="flex-1 min-w-[200px]">
             <label className="flex items-center gap-2 text-sm font-semibold text-slate-400 mb-2">
               <Search size={16} /> {t.pair}
@@ -430,6 +481,57 @@ function App() {
             </select>
           </div>
         </section>
+
+        {/* ── PAINEL ADMIN: Seletor de Fonte de Dados (visível apenas para eltonjung81@gmail.com) ── */}
+        {isAdmin && (
+          <section className="mb-6 bg-gradient-to-r from-violet-950/60 to-indigo-950/60 border border-violet-700/50 rounded-xl p-4">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-violet-500/20 rounded-lg flex items-center justify-center">
+                  <Shield size={16} className="text-violet-400" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-violet-400 uppercase tracking-widest">Admin Panel</p>
+                  <p className="text-xs text-slate-500">
+                    Fonte ativa para todos os usuários
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex-1 flex items-center gap-2 bg-slate-900/60 p-1 rounded-xl border border-violet-800/40">
+                {[
+                  { value: 'binance', label: '🔶 Binance', sub: 'Cripto (BTC, ETH...)' },
+                  { value: 'iqoption', label: '💹 IQ Option', sub: 'Forex & OTC' },
+                  { value: 'all', label: '🌐 Todas', sub: 'Binance + IQ Option' },
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    id={`admin-source-${opt.value}`}
+                    onClick={() => handleDataSourceChange(opt.value as 'binance' | 'iqoption' | 'all')}
+                    disabled={savingSource}
+                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-bold transition-all flex flex-col items-center gap-0.5
+                      ${ dataSource === opt.value
+                          ? 'bg-violet-600 text-white shadow-lg shadow-violet-500/20'
+                          : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+                      } ${savingSource ? 'opacity-60 cursor-wait' : ''}`}
+                  >
+                    <span>{opt.label}</span>
+                    <span className="text-[10px] font-normal opacity-70">{opt.sub}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2 text-xs">
+                <Database size={12} className="text-slate-500" />
+                <span className="text-slate-500">
+                  Binance: <span className="text-emerald-400 font-bold">{signalsBinance.length}</span> sinais
+                  {' · '}
+                  IQ Option: <span className="text-blue-400 font-bold">{signalsIQ.length}</span> sinais
+                </span>
+              </div>
+            </div>
+          </section>
+        )}
 
         <TradeSimulator lang={lang} />
 

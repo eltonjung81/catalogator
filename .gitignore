@@ -24,4 +24,8 @@ dist-ssr
 *.ntvs*
 *.njsproj
 *.sln
-*.sw?
+# IQ Option Collector
+iq_collector/.env
+iq_collector/firebase_service_account.json
+iq_collector/__pycache__
+iq_collector/*.pyc

@@ -1,0 +1,4 @@
+https://github.com/Lu-Yi-Hsun/iqoptionapi/archive/refs/heads/master.zip
+firebase-admin==6.5.0
+python-dotenv==1.0.1
+requests==2.31.0

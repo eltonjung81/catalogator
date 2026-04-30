@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.analyzeMarketAndSave = exports.mercadopagoWebhook = exports.createPreference = void 0;
-// Robot Version 4.0 — Clean State Machine Simulator
+// Robot Version 5.0 — Binance + IQ Option Multi-Source Simulator
 const admin = require("firebase-admin");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 admin.initializeApp();
@@ -10,7 +10,47 @@ Object.defineProperty(exports, "createPreference", { enumerable: true, get: func
 Object.defineProperty(exports, "mercadopagoWebhook", { enumerable: true, get: function () { return payments_1.mercadopagoWebhook; } });
 const cataloger_1 = require("./cataloger");
 const db = admin.firestore();
+// ── Pares Binance (Cripto) ────────────────────────────────────────────────────
 const PAIRS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'ADAUSDT', 'DOGEUSDT', 'DOTUSDT'];
+// ── Pares IQ Option que necessitam de dados do Firestore (via Python collector) ──
+const IQ_FOREX_PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF', 'EURGBP', 'EURJPY', 'GBPJPY', 'NZDUSD'];
+/**
+ * Detecta se um par é da IQ Option (OTC ou Forex).
+ * Esses pares têm candles armazenados no Firestore pelo Python collector.
+ */
+const isIQOptionPair = (pair) => {
+    return pair.includes('-OTC') || IQ_FOREX_PAIRS.includes(pair);
+};
+/**
+ * Busca candles de pares IQ Option do Firestore.
+ * O Python collector escreve em `candles_iq/{pair}_M{tf}` a cada minuto.
+ */
+const fetchCandlesIQ = async (pair, tf) => {
+    try {
+        const docRef = db.collection('candles_iq').doc(`${pair}_M${tf}`);
+        const snap = await docRef.get();
+        if (!snap.exists) {
+            console.log(`[IQ] candles_iq/${pair}_M${tf} ainda não disponível.`);
+            return [];
+        }
+        const data = snap.data();
+        return ((data === null || data === void 0 ? void 0 : data.candles) || []);
+    }
+    catch (err) {
+        console.error(`[IQ] Erro ao buscar candles_iq/${pair}_M${tf}:`, err);
+        return [];
+    }
+};
+/**
+ * Roteador: busca candles da fonte correta baseado no par.
+ */
+const fetchCandlesAny = async (pair, interval, limit) => {
+    if (isIQOptionPair(pair)) {
+        const tf = interval === '1m' ? 1 : 5;
+        return fetchCandlesIQ(pair, tf);
+    }
+    return (0, cataloger_1.fetchCandles)(pair, interval, limit);
+};
 const M5_STRATEGIES = [
     { name: 'MHI 1', func: cataloger_1.analyzeMHI1, entryIndex: 0 },
     { name: 'MHI 2', func: cataloger_1.analyzeMHI2, entryIndex: 1 },
@@ -77,18 +117,42 @@ const getScore = (history, dojiRate = 0) => {
 //     GAIN → registra GAIN → IDLE
 //     LOSS → registra LOSS → IDLE
 // ============================================================================
-async function runSimulator(prefTF, allSignalsData) {
+const isMarketPaused = () => {
     var _a, _b;
+    const now = new Date();
+    // Converte para o horário de Brasília
+    const brTime = new Intl.DateTimeFormat('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    }).formatToParts(now);
+    const hour = parseInt(((_a = brTime.find(p => p.type === 'hour')) === null || _a === void 0 ? void 0 : _a.value) || '0');
+    const minute = parseInt(((_b = brTime.find(p => p.type === 'minute')) === null || _b === void 0 ? void 0 : _b.value) || '0');
+    // Pausa das 22:30 até às 06:59
+    const isNight = (hour >= 23) || (hour === 22 && minute >= 30) || (hour < 7);
+    return isNight;
+};
+async function runSimulator(prefTF, allSignalsData) {
     const simRef = db.collection("stats").doc("global_simulator");
     const simSnap = await simRef.get();
-    const simData = simSnap.exists
-        ? simSnap.data()
-        : { phase: 'IDLE', bankroll: 5000, trades: [], lastCycleId: null, currentBet: 1, maxBet: 1 };
-    const phase = simData.phase || 'IDLE';
-    const currentBet = (_a = simData.currentBet) !== null && _a !== void 0 ? _a : 1;
-    const maxBet = (_b = simData.maxBet) !== null && _b !== void 0 ? _b : 1;
+    const rawData = (simSnap.data() || {});
+    const phase = rawData.phase || 'IDLE';
+    const bankroll = (typeof rawData.bankroll === 'number' && !isNaN(rawData.bankroll)) ? rawData.bankroll : 5000;
+    const currentBet = (typeof rawData.currentBet === 'number' && !isNaN(rawData.currentBet)) ? rawData.currentBet : 1;
+    const maxBet = (typeof rawData.maxBet === 'number' && !isNaN(rawData.maxBet)) ? rawData.maxBet : 1;
+    const simData = Object.assign(Object.assign({}, rawData), { phase, bankroll, currentBet, maxBet });
     const interval = prefTF === 1 ? '1m' : '5m';
     const candleIntervalMs = prefTF * 60 * 1000;
+    // ── VERIFICAÇÃO DE PAUSA NOTURNA ──────────────────────────────────────────
+    if (isMarketPaused() && phase === 'IDLE') {
+        console.log('[SIM] Mercado pausado (Horário Noturno: 22:30 - 07:00)');
+        await simRef.set({
+            statusMessage: 'Mercado Pausado (Retorno às 07:00)',
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        return;
+    }
     // ── IDLE: Procura novo sinal e seta M_FIXA enquanto vela ainda está aberta ─
     if (phase === 'IDLE') {
         const liveSignals = allSignalsData.filter(s => s.rawHistory && s.rawHistory.length > 0 && !s.isDead);
@@ -97,13 +161,17 @@ async function runSimulator(prefTF, allSignalsData) {
             return;
         }
         // Pre-calcula scores incluindo liquidez
-        const signalsWithLiquidity = await Promise.all(liveSignals.map(async (s) => {
-            const candles = await (0, cataloger_1.fetchCandles)(s.pair, interval, 100);
+        const signalsWithLiquidity = (await Promise.all(liveSignals.map(async (s) => {
+            const candles = await fetchCandlesAny(s.pair, interval, 100);
             const dojis = candles.filter(c => c.color === 'DOJI').length;
             const dojiRate = (dojis / (candles.length || 1)) * 100;
+            const recent = s.rawHistory.slice(-100);
+            const wins = recent.filter((r) => r.result >= 0).length;
+            const winRate = (wins / (recent.length || 1)) * 100;
             return Object.assign(Object.assign({}, s), { dojiRate,
+                winRate,
                 candles, score: getScore(s.rawHistory, dojiRate) });
-        }));
+        }))).filter(s => s.winRate >= 92); // FILTRO DE PROTEÇÃO: Somente estratégias com > 92%
         const sorted = signalsWithLiquidity.sort((a, b) => b.score - a.score);
         const topCandidates = sorted.slice(0, 5);
         let bestCandidate = null;
@@ -133,16 +201,25 @@ async function runSimulator(prefTF, allSignalsData) {
             }
         }
         if (!bestCandidate) {
-            const top1 = topCandidates[0];
-            console.log(`[SIM] Nenhum sinal nos top 3. Monitorando ${top1.pair}.`);
-            await simRef.set({
-                currentPair: top1.pair,
-                currentPattern: top1.pattern,
-                currentDirection: null,
-                phase: 'IDLE',
-                statusMessage: `Monitorando ${top1.pair}...`,
-                updatedAt: admin.firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
+            if (topCandidates.length > 0) {
+                const top1 = topCandidates[0];
+                console.log(`[SIM] Nenhum sinal nos top 3. Monitorando ${top1.pair}.`);
+                await simRef.set({
+                    currentPair: top1.pair,
+                    currentPattern: top1.pattern,
+                    currentDirection: null,
+                    phase: 'IDLE',
+                    statusMessage: `Monitorando ${top1.pair}...`,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+            }
+            else {
+                console.log('[SIM] Nenhum sinal atende aos critérios de segurança (>92% winrate).');
+                await simRef.set({
+                    statusMessage: 'Aguardando mercado favorável (>92% assertividade)...',
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+            }
             return;
         }
         const direction = bestSignal === 'GREEN' ? 'CALL' : 'PUT';
@@ -172,7 +249,7 @@ async function runSimulator(prefTF, allSignalsData) {
     }
     // ── M_FIXA: Aguarda vela de entrada fechar e processa resultado ───────────
     if (phase === 'M_FIXA') {
-        const candles = await (0, cataloger_1.fetchCandles)(simData.currentPair, interval, 10);
+        const candles = await fetchCandlesAny(simData.currentPair, interval, 10);
         const entryCandle = candles.find((c) => c.openTime === simData.entryCandleOpenTime);
         if (!entryCandle) {
             console.log(`[SIM] M_FIXA aguardando vela ${new Date(simData.entryCandleOpenTime).toISOString()}`);
@@ -183,7 +260,7 @@ async function runSimulator(prefTF, allSignalsData) {
             (direction === 'PUT' && entryCandle.color === 'RED');
         const profit = calcBetProfit(currentBet, isGain);
         const newBankroll = parseFloat((simData.bankroll + profit).toFixed(2));
-        const nextBet = isGain ? Math.max(1, currentBet - 0.5) : currentBet + 0.5;
+        const nextBet = isGain ? Math.max(1, parseFloat((currentBet / 1.3).toFixed(2))) : parseFloat((currentBet * 1.3).toFixed(2));
         const newMaxBet = Math.max(maxBet, currentBet, nextBet);
         const tradeEntry = {
             id: `${simData.lastCycleId}_MF`,
@@ -229,7 +306,7 @@ async function runSimulator(prefTF, allSignalsData) {
     }
     // ── GALE 1: Aguarda vela fechar e processa ────────────────────────────────
     if (phase === 'GALE1') {
-        const candles = await (0, cataloger_1.fetchCandles)(simData.currentPair, interval, 10);
+        const candles = await fetchCandlesAny(simData.currentPair, interval, 10);
         const galeCandle = candles.find((c) => c.openTime === simData.galeCandleOpenTime);
         if (!galeCandle) {
             console.log(`[SIM] GALE1 aguardando vela ${new Date(simData.galeCandleOpenTime).toISOString()}`);
@@ -240,7 +317,7 @@ async function runSimulator(prefTF, allSignalsData) {
             (direction === 'PUT' && galeCandle.color === 'RED');
         const profit = calcBetProfit(currentBet, isGain);
         const newBankroll = parseFloat((simData.bankroll + profit).toFixed(2));
-        const nextBet = isGain ? Math.max(1, currentBet - 0.5) : currentBet + 0.5;
+        const nextBet = isGain ? Math.max(1, parseFloat((currentBet / 1.3).toFixed(2))) : parseFloat((currentBet * 1.3).toFixed(2));
         const newMaxBet = Math.max(maxBet, currentBet, nextBet);
         const tradeEntry = {
             id: `${simData.lastCycleId}_G1`,
@@ -286,7 +363,7 @@ async function runSimulator(prefTF, allSignalsData) {
     }
     // ── GALE 2: Aguarda vela fechar e processa (último gale) ──────────────────
     if (phase === 'GALE2') {
-        const candles = await (0, cataloger_1.fetchCandles)(simData.currentPair, interval, 10);
+        const candles = await fetchCandlesAny(simData.currentPair, interval, 10);
         const galeCandle = candles.find((c) => c.openTime === simData.galeCandleOpenTime);
         if (!galeCandle) {
             console.log(`[SIM] GALE2 aguardando vela ${new Date(simData.galeCandleOpenTime).toISOString()}`);
@@ -297,7 +374,7 @@ async function runSimulator(prefTF, allSignalsData) {
             (direction === 'PUT' && galeCandle.color === 'RED');
         const profit = calcBetProfit(currentBet, isGain);
         const newBankroll = parseFloat((simData.bankroll + profit).toFixed(2));
-        const nextBet = isGain ? Math.max(1, currentBet - 0.5) : currentBet + 0.5;
+        const nextBet = isGain ? Math.max(1, parseFloat((currentBet / 1.3).toFixed(2))) : parseFloat((currentBet * 1.3).toFixed(2));
         const newMaxBet = Math.max(maxBet, currentBet, nextBet);
         const tradeEntry = {
             id: `${simData.lastCycleId}_G2`,
@@ -391,20 +468,32 @@ exports.analyzeMarketAndSave = (0, scheduler_1.onSchedule)({
     }
     await Promise.all(catalogingTasks);
     // ============================================================
-    // FASE 2: Simulador — máquina de estado limpa
+    // FASE 2: Simulador — máquina de estado limpa (multi-fonte)
     // ============================================================
     try {
         const configSnap = await db.collection("stats").doc("config").get();
-        const config = configSnap.exists ? configSnap.data() : { preferredTimeframe: 5 };
+        const config = configSnap.exists ? configSnap.data() : { preferredTimeframe: 5, dataSource: 'binance' };
         const prefTF = config.preferredTimeframe || 5;
-        const allSignalsSnap = await db.collection("signals")
-            .where("timeframe", "==", prefTF)
-            .get();
-        if (allSignalsSnap.empty) {
-            console.log(`[SIM] Nenhum sinal M${prefTF} disponível.`);
+        const dataSource = config.dataSource || 'binance';
+        let allSignalsData = [];
+        // Lê da coleção Binance se dataSource for 'binance' ou 'all'
+        if (dataSource === 'binance' || dataSource === 'all') {
+            const binanceSnap = await db.collection("signals")
+                .where("timeframe", "==", prefTF)
+                .get();
+            allSignalsData = [...allSignalsData, ...binanceSnap.docs.map(d => d.data())];
+        }
+        // Lê da coleção IQ Option se dataSource for 'iqoption' ou 'all'
+        if (dataSource === 'iqoption' || dataSource === 'all') {
+            const iqSnap = await db.collection("signals_iq")
+                .where("timeframe", "==", prefTF)
+                .get();
+            allSignalsData = [...allSignalsData, ...iqSnap.docs.map(d => d.data())];
+        }
+        if (allSignalsData.length === 0) {
+            console.log(`[SIM] Nenhum sinal M${prefTF} disponível para dataSource='${dataSource}'.`);
             return;
         }
-        const allSignalsData = allSignalsSnap.docs.map(doc => doc.data());
         await runSimulator(prefTF, allSignalsData);
     }
     catch (error) {
