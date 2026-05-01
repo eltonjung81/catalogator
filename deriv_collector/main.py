@@ -64,12 +64,10 @@ FOREX_PAIRS = [
     "frxGBPJPY", "frxNZDUSD"
 ]
 
-# Synthetic Indices (24/7) - Mantendo apenas os mais estáveis e conhecidos
-SYNTHETIC_PAIRS = [
-    "R_10", "R_25", "R_50", "R_75", "R_100"
-]
+# Synthetic Indices removidos a pedido do usuário
+SYNTHETIC_PAIRS = []
 
-ALL_SYMBOLS = FOREX_PAIRS + SYNTHETIC_PAIRS
+ALL_SYMBOLS = FOREX_PAIRS
 
 # ── Estratégias (Espelho do index.ts e iq_collector) ─────────────────────────
 
