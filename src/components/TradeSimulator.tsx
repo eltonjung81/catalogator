@@ -86,7 +86,7 @@ const fmtPrice = (p: number) => {
   return p.toFixed(5);
 };
 
-const START_DATE = new Date('2026-03-13T00:00:00');
+const START_DATE = new Date('2026-05-01T00:00:00');
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 
