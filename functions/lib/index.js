@@ -18,9 +18,6 @@ const IQ_FOREX_PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCH
  * Detecta se um par é da IQ Option (OTC ou Forex).
  * Esses pares têm candles armazenados no Firestore pelo Python collector.
  */
-const isIQOptionPair = (pair) => {
-    return pair.includes('-OTC') || IQ_FOREX_PAIRS.includes(pair);
-};
 /**
  * Busca candles de pares IQ Option do Firestore.
  * O Python collector escreve em `candles_iq/{pair}_M{tf}` a cada minuto.
@@ -44,9 +41,25 @@ const fetchCandlesIQ = async (pair, tf) => {
 /**
  * Roteador: busca candles da fonte correta baseado no par.
  */
+const fetchCandlesDeriv = async (pair, tf) => {
+    var _a;
+    try {
+        const docRef = db.collection('candles_deriv').doc(`${pair}_M${tf}`);
+        const snap = await docRef.get();
+        if (!snap.exists)
+            return [];
+        return (((_a = snap.data()) === null || _a === void 0 ? void 0 : _a.candles) || []);
+    }
+    catch (err) {
+        return [];
+    }
+};
 const fetchCandlesAny = async (pair, interval, limit) => {
-    if (isIQOptionPair(pair)) {
-        const tf = interval === '1m' ? 1 : 5;
+    const tf = interval === '1m' ? 1 : 5;
+    if (pair.startsWith('frx') || pair.startsWith('R_') || pair.includes('HZ')) {
+        return fetchCandlesDeriv(pair, tf);
+    }
+    if (pair.includes('-OTC') || IQ_FOREX_PAIRS.includes(pair)) {
         return fetchCandlesIQ(pair, tf);
     }
     return (0, cataloger_1.fetchCandles)(pair, interval, limit);
@@ -482,9 +495,9 @@ exports.analyzeMarketAndSave = (0, scheduler_1.onSchedule)({
     // ============================================================
     try {
         const configSnap = await db.collection("stats").doc("config").get();
-        const config = configSnap.exists ? configSnap.data() : { preferredTimeframe: 5, dataSource: 'binance' };
+        const config = configSnap.exists ? configSnap.data() : { preferredTimeframe: 5, dataSource: 'iqoption' };
         const prefTF = config.preferredTimeframe || 5;
-        const dataSource = config.dataSource || 'binance';
+        const dataSource = config.dataSource || 'iqoption';
         let allSignalsData = [];
         // Lê da coleção Binance se dataSource for 'binance' ou 'all'
         if (dataSource === 'binance' || dataSource === 'all') {
@@ -499,6 +512,13 @@ exports.analyzeMarketAndSave = (0, scheduler_1.onSchedule)({
                 .where("timeframe", "==", prefTF)
                 .get();
             allSignalsData = [...allSignalsData, ...iqSnap.docs.map(d => d.data())];
+        }
+        // Lê da coleção Deriv se dataSource for 'deriv' ou 'all'
+        if (dataSource === 'deriv' || dataSource === 'all') {
+            const derivSnap = await db.collection("signals_deriv")
+                .where("timeframe", "==", prefTF)
+                .get();
+            allSignalsData = [...allSignalsData, ...derivSnap.docs.map(d => d.data())];
         }
         if (allSignalsData.length === 0) {
             console.log(`[SIM] Nenhum sinal M${prefTF} disponível para dataSource='${dataSource}'.`);

@@ -35,9 +35,7 @@ const IQ_FOREX_PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCH
  * Detecta se um par é da IQ Option (OTC ou Forex).
  * Esses pares têm candles armazenados no Firestore pelo Python collector.
  */
-const isIQOptionPair = (pair: string): boolean => {
-  return pair.includes('-OTC') || IQ_FOREX_PAIRS.includes(pair);
-};
+
 
 /**
  * Busca candles de pares IQ Option do Firestore.
@@ -62,9 +60,23 @@ const fetchCandlesIQ = async (pair: string, tf: number): Promise<Candle[]> => {
 /**
  * Roteador: busca candles da fonte correta baseado no par.
  */
+const fetchCandlesDeriv = async (pair: string, tf: number): Promise<Candle[]> => {
+  try {
+    const docRef = db.collection('candles_deriv').doc(`${pair}_M${tf}`);
+    const snap = await docRef.get();
+    if (!snap.exists) return [];
+    return (snap.data()?.candles || []) as Candle[];
+  } catch (err) {
+    return [];
+  }
+};
+
 const fetchCandlesAny = async (pair: string, interval: string, limit: number): Promise<Candle[]> => {
-  if (isIQOptionPair(pair)) {
-    const tf = interval === '1m' ? 1 : 5;
+  const tf = interval === '1m' ? 1 : 5;
+  if (pair.startsWith('frx') || pair.startsWith('R_') || pair.includes('HZ')) {
+    return fetchCandlesDeriv(pair, tf);
+  }
+  if (pair.includes('-OTC') || IQ_FOREX_PAIRS.includes(pair)) {
     return fetchCandlesIQ(pair, tf);
   }
   return fetchCandles(pair, interval, limit);
@@ -565,9 +577,9 @@ export const analyzeMarketAndSave = onSchedule({
   // ============================================================
   try {
     const configSnap = await db.collection("stats").doc("config").get();
-    const config = configSnap.exists ? configSnap.data()! : { preferredTimeframe: 5, dataSource: 'binance' };
+    const config = configSnap.exists ? configSnap.data()! : { preferredTimeframe: 5, dataSource: 'iqoption' };
     const prefTF = config.preferredTimeframe || 5;
-    const dataSource: string = config.dataSource || 'binance';
+    const dataSource: string = config.dataSource || 'iqoption';
 
     let allSignalsData: any[] = [];
 
@@ -585,6 +597,14 @@ export const analyzeMarketAndSave = onSchedule({
         .where("timeframe", "==", prefTF)
         .get();
       allSignalsData = [...allSignalsData, ...iqSnap.docs.map(d => d.data())];
+    }
+
+    // Lê da coleção Deriv se dataSource for 'deriv' ou 'all'
+    if (dataSource === 'deriv' || dataSource === 'all') {
+      const derivSnap = await db.collection("signals_deriv")
+        .where("timeframe", "==", prefTF)
+        .get();
+      allSignalsData = [...allSignalsData, ...derivSnap.docs.map(d => d.data())];
     }
 
     if (allSignalsData.length === 0) {

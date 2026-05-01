@@ -30,7 +30,7 @@ INTERVAL    = int(os.getenv("UPDATE_INTERVAL_SECONDS", "60"))
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
@@ -335,11 +335,14 @@ def connect_iq() -> Optional[IQ_Option]:
     """Cria e autentica uma sessão na IQ Option. Retorna None se falhar."""
     try:
         api = IQ_Option(IQ_EMAIL, IQ_PASSWORD)
-        api.connect()
         connected, reason = api.connect()
         if not connected:
             log.error(f"Falha na conexão com IQ Option: {reason}")
             return None
+        
+        # Aguarda estabilização do websocket
+        time.sleep(5)
+        
         # Força conta de PRÁTICA para segurança (dados OTC são os mesmos)
         api.change_balance("PRACTICE")
         log.info("✅ Conectado à IQ Option (conta PRÁTICA)")
@@ -349,16 +352,31 @@ def connect_iq() -> Optional[IQ_Option]:
         return None
 
 
-def fetch_iq_candles(api: IQ_Option, pair: str, timeframe_seconds: int, count: int) -> list:
+def fetch_iq_candles(api: IQ_Option, pair: str, timeframe_seconds: int, count: int) -> Optional[list]:
     """
-    Busca candles da IQ Option e converte para o formato interno do catalogador:
-    { openTime (ms), open, high, low, close, volume, color }
+    Busca candles da IQ Option e converte para o formato interno do catalogador.
+    Retorna None se houver erro de conexão/API.
+    Retorna [] se o mercado estiver fechado (nenhum candle retornado pela API).
     """
     try:
         end_time = time.time()
+        # get_candles retorna False ou None se houver erro (ex: 'need reconnect')
         raw_candles = api.get_candles(pair, timeframe_seconds, count, end_time)
 
+        if raw_candles is None or raw_candles is False:
+            log.debug(f"DEBUG: get_candles({pair}) retornou {raw_candles}")
+            return None
+
+        if not isinstance(raw_candles, list):
+            log.debug(f"DEBUG: get_candles({pair}) retornou tipo inesperado: {type(raw_candles)}")
+            return None
+
         if not raw_candles:
+            log.debug(f"DEBUG: get_candles({pair}) retornou lista vazia []")
+            # Se for OTC e retornar vazio, é provável erro de conexão (OTC nunca para)
+            if "-OTC" in pair:
+                log.warning(f"⚠️ [{pair}] Retornou vazio mas é OTC. Possível erro de sessão.")
+                return None
             return []
 
         candles = []
@@ -369,7 +387,7 @@ def fetch_iq_candles(api: IQ_Option, pair: str, timeframe_seconds: int, count: i
             open_time_ms = int(c["from"] * 1000)
             close_time_ms = open_time_ms + candle_duration_ms - 1
 
-            # Filtra a vela ainda aberta (igual ao filtro da Binance: now > closeTime)
+            # Filtra a vela ainda aberta
             if now_ms <= close_time_ms:
                 continue
 
@@ -392,19 +410,20 @@ def fetch_iq_candles(api: IQ_Option, pair: str, timeframe_seconds: int, count: i
         
         # ── VALIDAÇÃO DE MERCADO ATIVO ───────────────────────────────────────
         if candles:
+            # Se o último candle for mais velho do que 15 minutos, o mercado está fechado
             last_candle_time_ms = candles[-1]["openTime"]
             now_ms = int(time.time() * 1000)
             age_minutes = (now_ms - last_candle_time_ms) / 60000
             
-            if age_minutes > 5:
+            if age_minutes > 15:
                 log.debug(f"[{pair}] Mercado fechado ou congelado (Last candle: {age_minutes:.1f} min ago). Pulando.")
                 return []
                 
         return candles
 
     except Exception as e:
-        log.error(f"Erro ao buscar candles de {pair} (tf={timeframe_seconds}s): {e}")
-        return []
+        log.error(f"Erro ao buscar candles de {pair}: {e}")
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -491,31 +510,59 @@ def save_signals_to_firestore(pair: str, tf: int, candles: list, strategies: lis
 # LOOP PRINCIPAL
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_collection_cycle(api: IQ_Option):
-    """Executa um ciclo completo de coleta para todos os pares e timeframes."""
+def run_collection_cycle(api: IQ_Option) -> bool:
+    """
+    Executa um ciclo completo de coleta para todos os pares e timeframes.
+    Retorna False se detectar erro crítico de conexão que exija reconexão forçada.
+    """
     log.info("─" * 60)
     log.info(f"🔄 Iniciando ciclo de coleta — {datetime.now().strftime('%H:%M:%S')}")
 
-    # Tenta processar todos os pares definidos. Se estiverem fechados, a API retornará vazio.
     pairs_to_process = OTC_PAIRS + FOREX_PAIRS
     log.info(f"📊 Processando {len(pairs_to_process)} pares (OTC + Forex)")
 
-    log.info(f"📊 Pares ativos para coleta: {len(pairs_to_process)}")
-
     for pair in pairs_to_process:
+        if not api.check_connect():
+            log.warning(f"📡 Conexão perdida ao processar {pair}. Tentando reconectar...")
+            connected, reason = api.connect()
+            if not connected:
+                log.error(f"❌ Falha ao reconectar durante o ciclo: {reason}")
+                return False
+
         for tf, count, strategies in [
             (1, M1_COUNT, M1_STRATEGIES),
             (5, M5_COUNT, M5_STRATEGIES),
         ]:
             timeframe_seconds = tf * 60
-            candles = fetch_iq_candles(api, pair, timeframe_seconds, count)
-            if candles:
+            
+            candles = None
+            error_count = 0
+            while error_count < 2:
+                candles = fetch_iq_candles(api, pair, timeframe_seconds, count)
+                if candles is not None:
+                    break
+                
+                error_count += 1
+                log.warning(f"⚠️ Erro ao buscar candles de {pair} M{tf} (Tentativa {error_count}/2).")
+                api.check_connect()
+                time.sleep(1)
+
+            if candles is None:
+                log.error(f"❌ Erro persistente ao buscar candles de {pair} M{tf}. Exigindo reconexão.")
+                return False
+
+            if len(candles) > 0:
+                log.info(f"✅ [{pair} M{tf}] {len(candles)} candles recebidos. Salvando...")
                 save_signals_to_firestore(pair, tf, candles, strategies)
             else:
-                log.warning(f"[{pair} M{tf}] Nenhum candle retornado.")
-            time.sleep(0.5)  # Respeita rate limit da IQ Option
+                log.debug(f"❌ [{pair} M{tf}] Sem dados recentes ou mercado fechado.")
+            
+            time.sleep(0.5)
+
+        time.sleep(1.0)
 
     log.info(f"✅ Ciclo concluído — próximo em {INTERVAL}s")
+    return True
 
 
 def main():
@@ -541,31 +588,41 @@ def main():
     consecutive_errors = 0
     MAX_ERRORS = 5
 
+    def force_reconnect():
+        nonlocal api
+        log.info("🔄 Executando reconexão forçada...")
+        if api:
+            try:
+                api.close()
+            except:
+                pass
+        api = connect_iq()
+        return api
+
     while True:
         try:
-            # Reconecta se necessário
+            # Conecta/Reconecta se necessário
             if api is None or not api.check_connect():
-                log.info("📡 Conectando na IQ Option...")
-                if api:
-                    try:
-                        api.close()
-                    except Exception:
-                        pass
-                api = connect_iq()
+                api = force_reconnect()
                 if api is None:
                     log.error(f"Falha na conexão. Tentando novamente em 30s... ({consecutive_errors}/{MAX_ERRORS})")
                     consecutive_errors += 1
-                    if consecutive_errors >= MAX_ERRORS:
-                        log.error("❌ Muitas falhas consecutivas. Aguardando 5 minutos...")
-                        time.sleep(300)
-                        consecutive_errors = 0
-                    else:
-                        time.sleep(30)
+                    time.sleep(30)
                     continue
-
+            
             # Executa ciclo de coleta
-            run_collection_cycle(api)
+            # Se o ciclo retornar False, detectamos que a conexão está 'morta'
+            success = run_collection_cycle(api)
+            if not success:
+                log.warning("⚠️ Ciclo interrompido por erro de conexão. Forçando reset...")
+                api = force_reconnect()
+                continue
+
             consecutive_errors = 0
+
+            # Verifica se recebemos dados. Se muitos pares falharem em sequência,
+            # talvez a conexão esteja 'zumbi' (check_connect diz True mas não vem dado)
+            # Por segurança, vamos resetar a cada 30 minutos ou se detectarmos vácuo.
 
         except KeyboardInterrupt:
             log.info("⛔ Interrompido pelo usuário.")

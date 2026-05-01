@@ -29,3 +29,10 @@ iq_collector/.env
 iq_collector/firebase_service_account.json
 iq_collector/__pycache__
 iq_collector/*.pyc
+
+# Deriv Collector
+deriv_collector/.env
+deriv_collector/firebase_service_account.json
+deriv_collector/__pycache__
+deriv_collector/*.pyc
+deriv_collector/test_deriv.py

@@ -117,11 +117,12 @@ function App() {
   // ── Sinais por fonte ─────────────────────────────────────────────────────
   const [signalsBinance, setSignalsBinance] = useState<SignalData[]>([]);
   const [signalsIQ, setSignalsIQ] = useState<SignalData[]>([]);
+  const [signalsDeriv, setSignalsDeriv] = useState<SignalData[]>([]);
   const [loadingData, setLoadingData] = useState(true);
 
   // ── Fonte de dados global (lida do Firestore em tempo real) ────────────────
-  // Valores: 'binance' | 'iqoption' | 'all'
-  const [dataSource, setDataSourceLocal] = useState<'binance' | 'iqoption' | 'all'>('binance');
+  // Valores: 'binance' | 'iqoption' | 'deriv' | 'all'
+  const [dataSource, setDataSourceLocal] = useState<'binance' | 'iqoption' | 'deriv' | 'all'>('deriv');
   const [savingSource, setSavingSource] = useState(false);
 
   const [lang, setLang] = useState<'pt' | 'en'>(() => {
@@ -147,7 +148,7 @@ function App() {
     const unsubConfig = onDocSnapshot(configRef, (snap) => {
       if (snap.exists()) {
         const src = snap.data()?.dataSource;
-        if (src === 'binance' || src === 'iqoption' || src === 'all') {
+        if (src === 'binance' || src === 'iqoption' || src === 'deriv' || src === 'all') {
           setDataSourceLocal(src);
         }
       }
@@ -156,7 +157,7 @@ function App() {
   }, []);
 
   // ── Salva a fonte de dados no Firestore quando o admin muda ─────────────
-  const handleDataSourceChange = async (newSource: 'binance' | 'iqoption' | 'all') => {
+  const handleDataSourceChange = async (newSource: 'binance' | 'iqoption' | 'deriv' | 'all') => {
     if (!isAdmin) return;
     setSavingSource(true);
     try {
@@ -174,7 +175,8 @@ function App() {
   useEffect(() => {
     let binanceReady = false;
     let iqReady = false;
-    const checkDone = () => { if (binanceReady && iqReady) setLoadingData(false); };
+    let derivReady = false;
+    const checkDone = () => { if (binanceReady && iqReady && derivReady) setLoadingData(false); };
 
     const unsubBinance = onSnapshot(
       query(collection(db, 'signals')),
@@ -193,18 +195,29 @@ function App() {
         iqReady = true;
         checkDone();
       },
-      () => { iqReady = true; checkDone(); } // Ainda não tem dados → não bloqueia
+      () => { iqReady = true; checkDone(); }
     );
 
-    return () => { unsubBinance(); unsubIQ(); };
+    const unsubDeriv = onSnapshot(
+      query(collection(db, 'signals_deriv')),
+      (snap) => {
+        setSignalsDeriv(snap.docs.map(d => ({ id: d.id, ...d.data() } as SignalData)));
+        derivReady = true;
+        checkDone();
+      },
+      () => { derivReady = true; checkDone(); }
+    );
+
+    return () => { unsubBinance(); unsubIQ(); unsubDeriv(); };
   }, []);
 
   // ── Sinais ativos baseados na fonte configurada pelo admin ──────────────
   const signals = useMemo(() => {
     if (dataSource === 'iqoption') return signalsIQ;
-    if (dataSource === 'all') return [...signalsBinance, ...signalsIQ];
+    if (dataSource === 'deriv') return signalsDeriv;
+    if (dataSource === 'all') return [...signalsBinance, ...signalsIQ, ...signalsDeriv];
     return signalsBinance; // 'binance' (padrão)
-  }, [dataSource, signalsBinance, signalsIQ]);
+  }, [dataSource, signalsBinance, signalsIQ, signalsDeriv]);
 
   const getScoreForSorting = useCallback((rawHistory: any[], limit: number): { rate: number; trendScore: number; finalScore: number; isRecovery: boolean } => {
     if (!rawHistory || rawHistory.length === 0) return { rate: 0, trendScore: -999, finalScore: 0, isRecovery: false };
@@ -514,12 +527,13 @@ function App() {
                 {[
                   { value: 'binance', label: '🔶 Binance', sub: 'Cripto (BTC, ETH...)' },
                   { value: 'iqoption', label: '💹 IQ Option', sub: 'Forex & OTC' },
-                  { value: 'all', label: '🌐 Todas', sub: 'Binance + IQ Option' },
+                  { value: 'deriv', label: '📈 Deriv', sub: 'Real & Sintético' },
+                  { value: 'all', label: '🌐 Todas', sub: 'Todas as fontes' },
                 ].map((opt) => (
                   <button
                     key={opt.value}
                     id={`admin-source-${opt.value}`}
-                    onClick={() => handleDataSourceChange(opt.value as 'binance' | 'iqoption' | 'all')}
+                    onClick={() => handleDataSourceChange(opt.value as 'binance' | 'iqoption' | 'deriv' | 'all')}
                     disabled={savingSource}
                     className={`flex-1 py-2 px-3 rounded-lg text-sm font-bold transition-all flex flex-col items-center gap-0.5
                       ${ dataSource === opt.value
@@ -536,7 +550,9 @@ function App() {
               <div className="flex items-center gap-2 text-xs">
                 <Database size={12} className="text-slate-500" />
                 <span className="text-slate-500">
-                  Binance: <span className="text-emerald-400 font-bold">{signalsBinance.length}</span> sinais
+                  Deriv: <span className="text-emerald-400 font-bold">{signalsDeriv.length}</span> sinais
+                  {' · '}
+                  Binance: <span className="text-orange-400 font-bold">{signalsBinance.length}</span> sinais
                   {' · '}
                   IQ Option: <span className="text-blue-400 font-bold">{signalsIQ.length}</span> sinais
                 </span>

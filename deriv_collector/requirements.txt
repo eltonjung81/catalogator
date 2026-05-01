@@ -1,0 +1,5 @@
+firebase-admin==6.5.0
+python-deriv-api
+python-dotenv==1.0.1
+requests==2.31.0
+websockets>=10.0
