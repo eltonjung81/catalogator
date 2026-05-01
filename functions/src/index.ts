@@ -1,4 +1,4 @@
-// Robot Version 5.0 — Binance + IQ Option Multi-Source Simulator
+// Robot Version 5.1 — Binance + IQ Option + Deriv Multi-Source Simulator (Refreshed)
 import * as admin from 'firebase-admin';
 import { onSchedule } from "firebase-functions/v2/scheduler";
 
