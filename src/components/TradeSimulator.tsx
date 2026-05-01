@@ -175,9 +175,9 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ lang }) => {
   const activeBet = simData.phase !== 'IDLE' ? (simData.currentBet ?? 1) : 0;
   const displayedBankroll = simData.bankroll - activeBet;
 
-  // Lucro acumulado (base de 1350 + sessão atual)
+  // Lucro acumulado (sessão atual)
   const sessionProfit = simData.bankroll - 5000;
-  const totalProfit = 1350 + sessionProfit;
+  const totalProfit = sessionProfit;
 
   // Dias de operação
   const operatingDays = Math.floor(Math.abs(Date.now() - START_DATE.getTime()) / 86400000);

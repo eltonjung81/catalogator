@@ -14,7 +14,7 @@ firebase_admin.initialize_app(cred)
 db = firestore.client()
 
 def reset_simulator():
-    sim_ref = db.collection('stats').doc('global_simulator')
+    sim_ref = db.collection('stats').document('global_simulator')
     
     reset_data = {
         'bankroll': 5000.0,
@@ -32,9 +32,9 @@ def reset_simulator():
     }
     
     sim_ref.set(reset_data, merge=True)
-    print("✅ Simulador resetado com sucesso!")
-    print("💰 Saldo: 5000.00")
-    print("📝 Histórico: Limpo")
+    print("Simulador resetado com sucesso!")
+    print("Saldo: 5000.00")
+    print("Historico: Limpo")
 
 if __name__ == "__main__":
     reset_simulator()
