@@ -240,7 +240,7 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
         candles, // Cache para uso posterior
         score: getScore(s.rawHistory, dojiRate) 
       };
-    }))).filter(s => s.winRate >= 92); // FILTRO DE PROTEÇÃO: Somente estratégias com > 92%
+    }))).filter(s => s.winRate >= 92); // FILTRO BASE: Mínimo 92% (o Score decidirá o melhor)
 
     const sorted = signalsWithLiquidity.sort((a, b) => b.score - a.score);
     const topCandidates = sorted.slice(0, 5); 
@@ -253,10 +253,12 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
     const strategies = prefTF === 1 ? M1_STRATEGIES : M5_STRATEGIES;
 
     for (const cand of topCandidates) {
+      if (cand.winRate < 92) continue; // FILTRO BASE: Mínimo 92%
+
       const strategy = strategies.find(s => s.name === cand.pattern);
       if (!strategy) continue;
 
-      const candles = cand.candles; // Usa o cache
+      const candles = cand.candles;
       if (candles.length < 6) continue;
 
       const blocks = groupInBlocks(candles, 5);
@@ -267,6 +269,7 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
       const signal = strategy.func(analysisBlock);
       
       if (signal) {
+        console.log(`[SIM] Candidato Escolhido: ${cand.pair} | WinRate: ${cand.winRate.toFixed(1)}% | Score: ${cand.score.toFixed(1)}`);
         bestCandidate = cand;
         bestSignal = signal;
         bestStrategy = strategy;
@@ -278,13 +281,13 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
     if (!bestCandidate) {
       if (topCandidates.length > 0) {
         const top1 = topCandidates[0];
-        console.log(`[SIM] Nenhum sinal nos top 3. Monitorando ${top1.pair}.`);
+        console.log(`[SIM] Nenhum sinal nos top 5 com padrão ativo. Melhor era ${top1.pair} (${top1.winRate.toFixed(1)}%)`);
         await simRef.set({
           currentPair: top1.pair,
           currentPattern: top1.pattern,
           currentDirection: null,
           phase: 'IDLE',
-          statusMessage: `Monitorando ${top1.pair}...`,
+          statusMessage: `Monitorando ${top1.pair} (${top1.winRate.toFixed(1)}%)...`,
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
         }, { merge: true });
       } else {
@@ -309,9 +312,9 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
     }
 
     const entryTimeStr = new Date(entryCandleOpenTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    const statusMsg = `Identificado: Entrando na vela de ${entryTimeStr} (${direction})`;
+    const statusMsg = `SINAL CONFIRMADO: ${bestCandidate.pair} | ${bestCandidate.pattern} | ${direction} às ${entryTimeStr}`;
 
-    console.log(`[SIM] ${statusMsg} para ${bestCandidate.pair}`);
+    console.log(`[SIM] ${statusMsg}`);
     await simRef.set({
       phase: 'M_FIXA',
       lastCycleId: cycleId,

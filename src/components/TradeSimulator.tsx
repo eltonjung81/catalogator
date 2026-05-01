@@ -31,6 +31,7 @@ interface SimData {
   updatedAt?: any;
   currentBet?: number;
   maxBet?: number;
+  entryCandleOpenTime?: number;
 }
 
 interface TradeSimulatorProps {
@@ -129,7 +130,8 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ lang }) => {
         statusMessage: data.statusMessage,
         updatedAt: data.updatedAt,
         currentBet: data.currentBet ?? 1,
-        maxBet: data.maxBet ?? 1
+        maxBet: data.maxBet ?? 1,
+        entryCandleOpenTime: data.entryCandleOpenTime
       });
 
       // Flash quando chega novo trade
@@ -207,7 +209,22 @@ export const TradeSimulator: React.FC<TradeSimulatorProps> = ({ lang }) => {
       };
     }
 
-    // Mão Fixa em andamento
+    // Sinal Confirmado — Aguardando vela começar
+    const isWaiting = simData.entryCandleOpenTime && simData.entryCandleOpenTime > Date.now();
+    if (isWaiting && simData.phase === 'M_FIXA') {
+      return {
+        msg: simData.statusMessage || `SINAL CONFIRMADO: ${pair}`,
+        subMsg: `Iniciando em ${fmtTime(simData.entryCandleOpenTime!)} | ${pattern} (${direction})`,
+        bgClass: 'bg-amber-500/20 border-amber-500/60 animate-pulse',
+        dotClass: 'bg-amber-400',
+        textClass: 'text-amber-200 text-lg font-bold',
+        icon: direction === 'CALL' 
+          ? <TrendingUp size={40} className="text-amber-400" />
+          : <TrendingDown size={40} className="text-amber-400" />
+      };
+    }
+
+    // Mão Fixa em andamento (já passou do tempo de entrada)
     if (simData.phase === 'M_FIXA') {
       return {
         msg: simData.statusMessage || `${t.inProgress} (Mão Fixa): ${pair} → ${direction}`,
