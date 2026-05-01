@@ -62,6 +62,18 @@ cred = credentials.Certificate(SA_PATH)
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
+# ── Watchdog para Travamentos ───────────────────────────────────────────────
+last_activity_time = time.time()
+
+def watchdog_thread():
+    """Mata o processo se ficar mais de 5 minutos sem atualizar a atividade."""
+    global last_activity_time
+    while True:
+        time.sleep(30)
+        if time.time() - last_activity_time > 300:
+            log.error("💀 WATCHDOG: Processo travado por mais de 5 minutos! Forçando restart...")
+            os._exit(1)  # Mata o processo inteiro imediatamente
+
 # ── IQ Option API ─────────────────────────────────────────────────────────────
 from iqoptionapi.stable_api import IQ_Option
 
@@ -522,6 +534,9 @@ def run_collection_cycle(api: IQ_Option) -> bool:
     log.info(f"📊 Processando {len(pairs_to_process)} pares (OTC + Forex)")
 
     for pair in pairs_to_process:
+        global last_activity_time
+        last_activity_time = time.time()  # Atualiza o watchdog a cada par processado
+
         if not api.check_connect():
             log.warning(f"📡 Conexão perdida ao processar {pair}. Tentando reconectar...")
             connected, reason = api.connect()
@@ -583,6 +598,10 @@ def main():
     log.info(f"   Email: {IQ_EMAIL}")
     log.info(f"   Pares OTC: {len(OTC_PAIRS)} | Forex: {len(FOREX_PAIRS)}")
     log.info(f"   Intervalo: {INTERVAL}s | M1: {M1_COUNT} candles | M5: {M5_COUNT} candles")
+
+    # Inicia o Watchdog
+    threading.Thread(target=watchdog_thread, daemon=True).start()
+    log.info("🐕 Watchdog de travamento ativado (5 min timeout)")
 
     api: Optional[IQ_Option] = None
     consecutive_errors = 0
