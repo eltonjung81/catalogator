@@ -178,18 +178,20 @@ def run_cataloger(blocks: list, pattern_func, entry_idx: int = 0) -> list:
 async def fetch_and_save(api: DerivAPI, symbol: str):
     print(f"[WAIT] Processando {symbol}...")
     try:
+        # Timeout de 20 segundos por símbolo para evitar travamentos
         for tf in [1, 5]:
             count = M1_COUNT if tf == 1 else M5_COUNT
             granularity = tf * 60
             
-            # Request candles
-            resp = await api.ticks_history({
+            # Request candles com timeout implícito via wait_for se necessário, 
+            # mas o deriv_api geralmente responde ou dá erro.
+            resp = await asyncio.wait_for(api.ticks_history({
                 "ticks_history": symbol,
                 "style": "candles",
                 "granularity": granularity,
                 "count": count,
                 "end": "latest"
-            })
+            }), timeout=15)
             
             if "candles" not in resp:
                 log.warning(f"[WARN] {symbol} M{tf} nao retornou candles.")
@@ -233,22 +235,33 @@ async def fetch_and_save(api: DerivAPI, symbol: str):
             batch.commit()
             print(f"[OK] {symbol} M{tf} salvo.")
             
+    except asyncio.TimeoutError:
+        log.error(f"[TIMEOUT] Limite de tempo excedido para {symbol}")
     except Exception as e:
         log.error(f"[ERR] Erro em {symbol}: {e}")
+        raise e # Propaga para reiniciar a conexão no main loop
 
 async def main():
     print("Deriv Collector Iniciado")
-    api = DerivAPI(app_id=DERIV_APP_ID)
     
     while True:
-        start_time = time.time()
-        for s in ALL_SYMBOLS:
-            await fetch_and_save(api, s)
+        try:
+            print("Conectando à Deriv API...")
+            api = DerivAPI(app_id=DERIV_APP_ID)
+            
+            while True:
+                start_time = time.time()
+                for s in ALL_SYMBOLS:
+                    await fetch_and_save(api, s)
+                
+                elapsed = time.time() - start_time
+                wait_time = max(0, UPDATE_INTERVAL - elapsed)
+                log.info(f"Ciclo concluido em {elapsed:.1f}s. Aguardando {wait_time:.1f}s...")
+                await asyncio.sleep(wait_time)
         
-        elapsed = time.time() - start_time
-        wait_time = max(0, UPDATE_INTERVAL - elapsed)
-        log.info(f"Ciclo concluido em {elapsed:.1f}s. Aguardando {wait_time:.1f}s...")
-        await asyncio.sleep(wait_time)
+        except Exception as e:
+            log.error(f"[CRITICAL] Erro no loop principal: {e}. Reiniciando em 10s...")
+            await asyncio.sleep(10)
 
 if __name__ == "__main__":
     try:
