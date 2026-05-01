@@ -131,7 +131,8 @@ const getScore = (history: TradeResult[], dojiRate: number = 0): number => {
   const winRate = wins / recent.length;
   // Penalidade pesada para Dojis: subtrai 2 pontos para cada 1% de Doji
   const liquidityPenalty = dojiRate * 2;
-  return (trendScore * 10) + (winRate * 100) - liquidityPenalty;
+  // Peso ajustado: WinRate (Longo Prazo) tem peso 200, Trend (Curto Prazo) reduzido para peso 5
+  return (trendScore * 5) + (winRate * 200) - liquidityPenalty;
 };
 
 // ============================================================================
