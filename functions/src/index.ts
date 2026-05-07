@@ -154,23 +154,6 @@ const getScore = (history: TradeResult[], dojiRate: number = 0): number => {
 //     LOSS → registra LOSS → IDLE
 // ============================================================================
 
-const isMarketPaused = (): boolean => {
-  const now = new Date();
-  // Converte para o horário de Brasília
-  const brTime = new Intl.DateTimeFormat('pt-BR', {
-    timeZone: 'America/Sao_Paulo',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  }).formatToParts(now);
-
-  const hour = parseInt(brTime.find(p => p.type === 'hour')?.value || '0');
-  const minute = parseInt(brTime.find(p => p.type === 'minute')?.value || '0');
-
-  // Pausa das 22:30 até às 06:59
-  const isNight = (hour >= 23) || (hour === 22 && minute >= 30) || (hour < 7);
-  return isNight;
-};
 
 interface SimData {
   phase: string;
@@ -201,48 +184,53 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
   const interval = prefTF === 1 ? '1m' : '5m';
   const candleIntervalMs = prefTF * 60 * 1000;
 
-  // ── VERIFICAÇÃO DE PAUSA NOTURNA ──────────────────────────────────────────
-  if (isMarketPaused() && phase === 'IDLE') {
-    console.log('[SIM] Mercado pausado (Horário Noturno: 22:30 - 07:00)');
-    await simRef.set({
-      statusMessage: 'Mercado Pausado (Retorno às 07:00)',
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
-    return;
-  }
-
   // ── IDLE: Procura novo sinal e seta M_FIXA enquanto vela ainda está aberta ─
   if (phase === 'IDLE') {
 
-    const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+    const fiveMinutesAgo = Date.now() - (10 * 60 * 1000); // Aumentado para 10 min para ser mais tolerante
     const liveSignals = allSignalsData.filter(s => {
       const isRecent = s.updatedAt && (s.updatedAt.toMillis ? s.updatedAt.toMillis() : s.updatedAt) > fiveMinutesAgo;
       return s.rawHistory && s.rawHistory.length > 0 && !s.isDead && isRecent;
     });
+
     if (liveSignals.length === 0) {
       console.log('[SIM] Nenhum sinal ativo disponível.');
+      await simRef.set({
+        statusMessage: `Aguardando sinais vivos... (Encontrados: ${allSignalsData.length})`,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
       return;
     }
+
     // Pre-calcula scores incluindo liquidez
     const signalsWithLiquidity = (await Promise.all(liveSignals.map(async s => {
-      const candles = await fetchCandlesAny(s.pair, interval, 100);
-      const dojis = candles.filter(c => c.color === 'DOJI').length;
-      const dojiRate = (dojis / (candles.length || 1)) * 100;
-      
-      const recent = s.rawHistory.slice(-100);
-      const wins = recent.filter((r: any) => r.result >= 0).length;
-      const winRate = (wins / (recent.length || 1)) * 100;
+      try {
+        const candles = await fetchCandlesAny(s.pair, interval, 100);
+        if (!candles || candles.length < 5) return null;
 
-      return { 
-        ...s, 
-        dojiRate, 
-        winRate,
-        candles, // Cache para uso posterior
-        score: getScore(s.rawHistory, dojiRate) 
-      };
-    }))).filter(s => s.winRate >= 92); // FILTRO BASE: Mínimo 92% (o Score decidirá o melhor)
+        const dojis = candles.filter(c => c.color === 'DOJI').length;
+        const dojiRate = (dojis / (candles.length || 1)) * 100;
+        
+        const recent = s.rawHistory.slice(-100);
+        const wins = recent.filter((r: any) => r.result >= 0).length;
+        const winRate = (wins / (recent.length || 1)) * 100;
 
-    const sorted = signalsWithLiquidity.sort((a, b) => b.score - a.score);
+        return { 
+          ...s, 
+          dojiRate, 
+          winRate,
+          candles, // Cache para uso posterior
+          score: getScore(s.rawHistory, dojiRate) 
+        };
+      } catch (err) {
+        console.error(`[SIM] Erro ao processar liquidez para ${s.pair}:`, err);
+        return null;
+      }
+    })));
+
+    const validSignals = signalsWithLiquidity.filter((s): s is any => s !== null && s.winRate >= 92);
+
+    const sorted = validSignals.sort((a, b) => b.score - a.score);
     const topCandidates = sorted.slice(0, 5); 
 
     let bestCandidate: any = null;
@@ -253,8 +241,6 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
     const strategies = prefTF === 1 ? M1_STRATEGIES : M5_STRATEGIES;
 
     for (const cand of topCandidates) {
-      if (cand.winRate < 92) continue; // FILTRO BASE: Mínimo 92%
-
       const strategy = strategies.find(s => s.name === cand.pattern);
       if (!strategy) continue;
 
@@ -281,19 +267,21 @@ async function runSimulator(prefTF: number, allSignalsData: any[]) {
     if (!bestCandidate) {
       if (topCandidates.length > 0) {
         const top1 = topCandidates[0];
-        console.log(`[SIM] Nenhum sinal nos top 5 com padrão ativo. Melhor era ${top1.pair} (${top1.winRate.toFixed(1)}%)`);
+        const statusMsg = `Analisando ${validSignals.length} sinais... Melhor: ${top1.pair} (${top1.winRate.toFixed(1)}%) sem entrada agora.`;
+        console.log(`[SIM] ${statusMsg}`);
         await simRef.set({
           currentPair: top1.pair,
           currentPattern: top1.pattern,
           currentDirection: null,
           phase: 'IDLE',
-          statusMessage: `Monitorando ${top1.pair} (${top1.winRate.toFixed(1)}%)...`,
+          statusMessage: statusMsg,
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
         }, { merge: true });
       } else {
-        console.log('[SIM] Nenhum sinal atende aos critérios de segurança (>92% winrate).');
+        const statusMsg = `Aguardando assertividade > 92%... (Sinais vivos: ${liveSignals.length})`;
+        console.log(`[SIM] ${statusMsg}`);
         await simRef.set({
-          statusMessage: 'Aguardando mercado favorável (>92% assertividade)...',
+          statusMessage: statusMsg,
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
         }, { merge: true });
       }
@@ -512,7 +500,7 @@ export const analyzeMarketAndSave = onSchedule({
   region: 'southamerica-east1',
   schedule: "every 1 minutes",
   timeoutSeconds: 300,
-  memory: "512MiB"
+  memory: "1GiB"
 }, async () => {
   console.log("Iniciando catalogação massiva via Binance...");
 
